@@ -41,7 +41,16 @@ app.use(
         return callback(null, true);
       }
       const normalized = origin.replace(/\/+$/, '');
-      if (allowedOrigins.includes(normalized)) {
+      const isAllowed = allowedOrigins.some((allowed) => {
+        if (!allowed.includes('*')) return allowed === normalized;
+        // Wildcard support, e.g. https://*.vercel.app
+        const pattern = allowed
+          .split('*')
+          .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+          .join('[a-z0-9-]+(?:\\.[a-z0-9-]+)*');
+        return new RegExp(`^${pattern}$`, 'i').test(normalized);
+      });
+      if (isAllowed) {
         return callback(null, true);
       }
       return callback(new Error(`Origin ${origin} not allowed by CORS`));

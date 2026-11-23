@@ -43,6 +43,11 @@ const quizSchema = new Schema(
       required: true,
       trim: true,
     },
+    subExams: {
+      type: [String],
+      default: [],
+      index: true,
+    },
     subExamName: {
       type: String,
       trim: true,

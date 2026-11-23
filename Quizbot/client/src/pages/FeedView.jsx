@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Flame, Loader2, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import { apiRequest } from '../lib/api.js';
+import {
+  extractLanguagesArray,
+  extractSubExamsArray,
+} from '../lib/sscTaxonomyPreset.js';
 import { getDeepLinkedQuizId } from '../lib/telegram.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import QuizCard from '../components/QuizCard.jsx';
@@ -161,13 +165,53 @@ export default function FeedView({
       : examFilter?.language || '';
   const activeSubject = examFilter?.subjectName || '';
 
-  // Subjects available under the currently active exam for quick 1-tap switching
+  // Subjects available under the currently active exam + subExam + language for quick 1-tap switching
   const subjectsForActiveExam = useMemo(() => {
     const tags = groupedByExam[activeExam] || [];
+    const activeLangList = activeLanguage
+      ? activeLanguage
+          .split(',')
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean)
+      : [];
+    const activeSubExamList = Array.isArray(examFilter?.subExams)
+      ? examFilter.subExams
+          .map((s) => String(s || '').trim().toLowerCase())
+          .filter(Boolean)
+      : examFilter?.subExamName
+        ? examFilter.subExamName
+            .split(',')
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean)
+        : [];
+
+    const filtered = tags.filter((t) => {
+      if (activeLangList.length > 0) {
+        const tagLangs = extractLanguagesArray(t).map((l) => l.toLowerCase());
+        if (!tagLangs.some((l) => activeLangList.includes(l))) return false;
+      }
+      if (activeSubExamList.length > 0) {
+        const tagSubExams = extractSubExamsArray(t).map((s) => s.toLowerCase());
+        if (
+          tagSubExams.length > 0 &&
+          !tagSubExams.some((s) => activeSubExamList.includes(s))
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
+
     return Array.from(
-      new Set(tags.map((t) => (t.subjectName || '').trim()).filter(Boolean))
+      new Set(filtered.map((t) => (t.subjectName || '').trim()).filter(Boolean))
     );
-  }, [groupedByExam, activeExam]);
+  }, [
+    groupedByExam,
+    activeExam,
+    activeLanguage,
+    examFilter?.subExams,
+    examFilter?.subExamName,
+  ]);
 
   const fetchBatch = useCallback(
     async ({ reset = false, currentSeen = [] } = {}) => {
@@ -210,8 +254,13 @@ export default function FeedView({
         if (activeExam) {
           params.set('examName', activeExam);
         }
-        if (examFilter?.subExamName) {
-          params.set('subExamName', examFilter.subExamName);
+        const activeSubExams =
+          Array.isArray(examFilter?.subExams) && examFilter.subExams.length > 0
+            ? examFilter.subExams.join(',')
+            : examFilter?.subExamName || '';
+        if (activeSubExams) {
+          params.set('subExams', activeSubExams);
+          params.set('subExamName', activeSubExams);
         }
         if (activeLanguage) {
           params.set('language', activeLanguage);
@@ -221,6 +270,9 @@ export default function FeedView({
         }
         if (examFilter?.subSubjectName) {
           params.set('subSubjectName', examFilter.subSubjectName);
+        }
+        if (examFilter?.subTopicName) {
+          params.set('subTopicName', examFilter.subTopicName);
         }
         if (examFilter?.hashtagId) {
           params.set('hashtag', examFilter.hashtagId);
@@ -253,7 +305,9 @@ export default function FeedView({
       activeLanguage,
       activeSubject,
       examFilter?.subExamName,
+      examFilter?.subExams,
       examFilter?.subSubjectName,
+      examFilter?.subTopicName,
       examFilter?.hashtagId,
       exams.length,
       feedTab,
@@ -302,10 +356,21 @@ export default function FeedView({
         : activeLanguage
           ? activeLanguage.split(',')
           : ['English'];
+    const subExams =
+      Array.isArray(examFilter?.subExams) && examFilter.subExams.length > 0
+        ? examFilter.subExams
+        : examFilter?.subExamName
+          ? examFilter.subExamName
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [];
     const isAll = !subj || subj === 'ALL';
+    const subExamPart = subExams.length > 0 ? ` › ${subExams.join(' + ')}` : '';
     onUpdateExamFilter?.({
       examName: activeExam,
-      subExamName: examFilter?.subExamName || '',
+      subExams,
+      subExamName: subExams.join(', '),
       languages: langs,
       language: langs.join(','),
       subjectName: isAll ? '' : subj,
@@ -313,7 +378,7 @@ export default function FeedView({
       subTopicName: '',
       hashtagId: '',
       tag: '',
-      label: `${activeExam} › ${isAll ? 'All Subjects' : subj} (${langs.join(' + ')})`,
+      label: `${activeExam}${subExamPart} › ${isAll ? 'All Subjects' : subj} (${langs.join(' + ')})`,
     });
   }
 

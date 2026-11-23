@@ -162,11 +162,20 @@ export async function createQuiz(req, res, next) {
       return res.status(409).json({ error: DUPLICATE_QUIZ_MESSAGE });
     }
 
+    const docSubExams =
+      Array.isArray(hashtagDoc.subExams) && hashtagDoc.subExams.length > 0
+        ? hashtagDoc.subExams
+        : (hashtagDoc.subExamName || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+
     const quiz = await Quiz.create({
       creator: req.user._id,
       hashtag: hashtagDoc._id,
       examName: hashtagDoc.examName,
-      subExamName: hashtagDoc.subExamName || '',
+      subExams: docSubExams,
+      subExamName: docSubExams.join(', '),
       language: matchedLang,
       subjectName: hashtagDoc.subjectName,
       subSubjectName: hashtagDoc.subSubjectName || '',
@@ -192,7 +201,7 @@ export async function createQuiz(req, res, next) {
       {
         path: 'hashtag',
         select:
-          'examName subExamName languages subjectName subSubjectName subTopicName tag syllabusScope isActive',
+          'examName subExams subExamName languages subjectName subSubjectName subTopicName tag customTag syllabusScope isActive',
       },
     ]);
 
@@ -316,6 +325,14 @@ export async function createBulkQuizzes(req, res, next) {
     const docsToInsert = [];
     let skippedExistingDuplicates = 0;
 
+    const docSubExams =
+      Array.isArray(hashtagDoc.subExams) && hashtagDoc.subExams.length > 0
+        ? hashtagDoc.subExams
+        : (hashtagDoc.subExamName || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+
     for (const candidate of validCandidates) {
       if (existingHashSet.has(candidate.questionHash)) {
         skippedExistingDuplicates += 1;
@@ -325,7 +342,8 @@ export async function createBulkQuizzes(req, res, next) {
         creator: req.user._id,
         hashtag: hashtagDoc._id,
         examName: hashtagDoc.examName,
-        subExamName: hashtagDoc.subExamName || '',
+        subExams: docSubExams,
+        subExamName: docSubExams.join(', '),
         language: matchedLang,
         subjectName: hashtagDoc.subjectName,
         subSubjectName: hashtagDoc.subSubjectName || '',
@@ -367,6 +385,7 @@ export async function getQuizFeed(req, res, next) {
     const {
       examName,
       subExamName,
+      subExams,
       language,
       subjectName,
       subSubjectName,
@@ -416,12 +435,49 @@ export async function getQuizFeed(req, res, next) {
       query.examName = examName.trim();
     }
 
+    const rawSubExamParam = subExams || subExamName;
     if (
-      typeof subExamName === 'string' &&
-      subExamName.trim() !== '' &&
-      subExamName.trim().toUpperCase() !== 'ALL'
+      typeof rawSubExamParam === 'string' &&
+      rawSubExamParam.trim() !== '' &&
+      rawSubExamParam.trim().toUpperCase() !== 'ALL'
     ) {
-      query.subExamName = subExamName.trim();
+      const selectedSubExamList = rawSubExamParam
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s && s.toUpperCase() !== 'ALL');
+
+      if (selectedSubExamList.length > 0) {
+        const regexList = selectedSubExamList.map((se) => {
+          const escaped = se.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          return new RegExp(`(?:^|,)\\s*${escaped}\\s*(?:,|$)`, 'i');
+        });
+
+        // Match topics whose subExams array contains the chosen sub-exam (or global topics with empty subExams)
+        const matchingTags = await Hashtag.find({
+          ...(query.examName ? { examName: query.examName } : {}),
+          $or: [
+            { subExams: { $in: selectedSubExamList } },
+            { subExams: { $size: 0 } },
+            { subExamName: { $in: regexList } },
+            { subExamName: '' },
+          ],
+        })
+          .select('_id')
+          .lean();
+
+        const matchingTagIds = matchingTags.map((t) => t._id);
+
+        query.$and = [
+          ...(query.$and || []),
+          {
+            $or: [
+              { hashtag: { $in: matchingTagIds } },
+              { subExams: { $in: selectedSubExamList } },
+              { subExamName: { $in: regexList } },
+            ],
+          },
+        ];
+      }
     }
 
     if (
@@ -444,10 +500,15 @@ export async function getQuizFeed(req, res, next) {
         );
 
         if (includesEnglish) {
-          query.$or = [
-            { language: { $in: regexList } },
-            { language: { $exists: false } },
-            { language: '' },
+          query.$and = [
+            ...(query.$and || []),
+            {
+              $or: [
+                { language: { $in: regexList } },
+                { language: { $exists: false } },
+                { language: '' },
+              ],
+            },
           ];
         } else {
           query.language = { $in: regexList };
@@ -515,7 +576,10 @@ export async function getQuizFeed(req, res, next) {
       .sort({ createdAt: -1 })
       .limit(candidateLimit)
       .populate('creator', 'firstName username photoUrl')
-      .populate('hashtag', 'examName subjectName tag syllabusScope isActive')
+      .populate(
+        'hashtag',
+        'examName subExams subExamName languages subjectName subSubjectName subTopicName tag customTag syllabusScope isActive'
+      )
       .lean();
 
     const remainingSlots = pinnedQuiz ? Math.max(0, parsedLimit - 1) : parsedLimit;
@@ -549,6 +613,15 @@ export async function getQuizFeed(req, res, next) {
         creator: q.creator,
         hashtag: q.hashtag,
         examName: q.examName,
+        subExams:
+          Array.isArray(q.subExams) && q.subExams.length > 0
+            ? q.subExams
+            : Array.isArray(q.hashtag?.subExams) && q.hashtag.subExams.length > 0
+              ? q.hashtag.subExams
+              : (q.subExamName || q.hashtag?.subExamName || '')
+                  .split(',')
+                  .map((s) => s.trim())
+                  .filter(Boolean),
         subExamName: q.subExamName || q.hashtag?.subExamName || '',
         language: q.language || 'English',
         subjectName: q.subjectName,

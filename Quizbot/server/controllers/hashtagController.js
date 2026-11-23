@@ -9,34 +9,42 @@ import {
   invalidateHashtagsCache,
   invalidateLeaderboardCache,
 } from '../utils/cache.js';
+import {
+  SSC_TAXONOMY_PRESET,
+  normalizeEnglishTopicLabel,
+} from '../utils/sscTaxonomySeed.js';
 
 const HASHTAGS_TTL_SECONDS = 300; // 5 minutes
 
-function normalizeLanguagesList(raw) {
-  let list = [];
-  if (Array.isArray(raw)) {
-    list = raw.flatMap((entry) => String(entry || '').split(','));
-  } else if (typeof raw === 'string') {
-    list = raw.split(',');
-  }
-  const cleaned = Array.from(
+export function parseStringArray(raw) {
+  if (!raw) return [];
+  const parts = Array.isArray(raw)
+    ? raw.flatMap((entry) => String(entry || '').split(','))
+    : String(raw).split(',');
+  return Array.from(
     new Set(
-      list
-        .map((l) => l.trim())
+      parts
+        .map((s) => s.trim())
         .filter(Boolean)
     )
   );
+}
+
+function normalizeLanguagesList(raw) {
+  const cleaned = parseStringArray(raw);
   return cleaned.length > 0 ? cleaned : ['English'];
 }
 
 function buildDefaultTag({
   examName,
-  subExamName,
+  subExams = [],
   subjectName,
   subSubjectName,
   subTopicName,
 }) {
-  return [examName, subExamName, subjectName, subSubjectName, subTopicName]
+  const subExamPart =
+    Array.isArray(subExams) && subExams.length === 1 ? subExams[0] : '';
+  return [examName, subExamPart, subjectName, subSubjectName, subTopicName]
     .map((part) =>
       String(part || '')
         .trim()
@@ -67,20 +75,63 @@ export async function getHashtags(req, res, next) {
     const rawHashtags = await Hashtag.find(filter)
       .sort({
         examName: 1,
-        subExamName: 1,
         subjectName: 1,
         subSubjectName: 1,
         subTopicName: 1,
       })
       .lean();
 
-    const hashtags = rawHashtags.map((item) => ({
-      ...item,
-      languages:
-        Array.isArray(item.languages) && item.languages.length > 0
-          ? item.languages
-          : ['English'],
-    }));
+    const legacyUpdates = [];
+
+    const hashtags = rawHashtags.map((item) => {
+      const normalizedSubExams = Array.from(
+        new Set([
+          ...parseStringArray(item.subExams),
+          ...parseStringArray(item.subExamName),
+        ])
+      );
+      const normalizedLanguages = normalizeLanguagesList(
+        item.languages || item.allowedLanguages
+      );
+      const cleanSubSubject = normalizeEnglishTopicLabel(item.subSubjectName);
+      const cleanSubTopic = normalizeEnglishTopicLabel(item.subTopicName);
+
+      // Migrate legacy comma-separated subExamName or Hindi labels in DB
+      if (
+        !Array.isArray(item.subExams) ||
+        item.subExams.length !== normalizedSubExams.length ||
+        cleanSubSubject !== (item.subSubjectName || '') ||
+        cleanSubTopic !== (item.subTopicName || '')
+      ) {
+        legacyUpdates.push(
+          Hashtag.updateOne(
+            { _id: item._id },
+            {
+              $set: {
+                subExams: normalizedSubExams,
+                subExamName: normalizedSubExams.join(', '),
+                subSubjectName: cleanSubSubject,
+                subTopicName: cleanSubTopic,
+              },
+            }
+          ).catch(() => {})
+        );
+      }
+
+      return {
+        ...item,
+        subExams: normalizedSubExams,
+        subExamName: normalizedSubExams.join(', '),
+        languages: normalizedLanguages,
+        allowedLanguages: normalizedLanguages,
+        subSubjectName: cleanSubSubject,
+        subTopicName: cleanSubTopic,
+      };
+    });
+
+    if (legacyUpdates.length > 0) {
+      Promise.all(legacyUpdates).catch(() => {});
+    }
 
     const groupedByExam = {};
     for (const item of hashtags) {
@@ -110,12 +161,15 @@ export async function createHashtag(req, res, next) {
   try {
     const {
       examName,
+      subExams,
       subExamName = '',
       languages,
+      allowedLanguages,
       subjectName,
       subSubjectName = '',
       subTopicName = '',
       tag,
+      customTag = '',
       syllabusScope = '',
     } = req.body || {};
 
@@ -125,12 +179,22 @@ export async function createHashtag(req, res, next) {
       });
     }
 
+    const parsedSubExams = parseStringArray(
+      subExams !== undefined ? subExams : subExamName
+    );
+    const parsedLanguages = normalizeLanguagesList(
+      languages !== undefined ? languages : allowedLanguages
+    );
+    const cleanSubject = normalizeEnglishTopicLabel(subjectName);
+    const cleanSubSubject = normalizeEnglishTopicLabel(subSubjectName);
+    const cleanSubTopic = normalizeEnglishTopicLabel(subTopicName);
+
     const autoTag = buildDefaultTag({
       examName,
-      subExamName,
-      subjectName,
-      subSubjectName,
-      subTopicName,
+      subExams: parsedSubExams,
+      subjectName: cleanSubject,
+      subSubjectName: cleanSubSubject,
+      subTopicName: cleanSubTopic,
     });
 
     const normalizedTag = (tag?.trim() ? tag.trim() : autoTag)
@@ -149,16 +213,16 @@ export async function createHashtag(req, res, next) {
       });
     }
 
-    const normalizedLanguages = normalizeLanguagesList(languages);
-
     const hashtag = await Hashtag.create({
       examName: examName.trim(),
-      subExamName: String(subExamName || '').trim(),
-      languages: normalizedLanguages,
-      subjectName: subjectName.trim(),
-      subSubjectName: String(subSubjectName || '').trim(),
-      subTopicName: String(subTopicName || '').trim(),
+      subExams: parsedSubExams,
+      subExamName: parsedSubExams.join(', '),
+      languages: parsedLanguages,
+      subjectName: cleanSubject,
+      subSubjectName: cleanSubSubject,
+      subTopicName: cleanSubTopic,
       tag: normalizedTag,
+      customTag: String(customTag || '').trim(),
       syllabusScope: String(syllabusScope || '').trim(),
       isActive: true,
     });
@@ -190,12 +254,15 @@ export async function updateHashtag(req, res, next) {
       isActive,
       syllabusScope,
       examName,
+      subExams,
       subExamName,
       languages,
+      allowedLanguages,
       subjectName,
       subSubjectName,
       subTopicName,
       tag,
+      customTag,
     } = req.body || {};
 
     if (typeof isActive === 'boolean') {
@@ -204,12 +271,15 @@ export async function updateHashtag(req, res, next) {
       isActive === undefined &&
       syllabusScope === undefined &&
       examName === undefined &&
+      subExams === undefined &&
       subExamName === undefined &&
       languages === undefined &&
+      allowedLanguages === undefined &&
       subjectName === undefined &&
       subSubjectName === undefined &&
       subTopicName === undefined &&
-      tag === undefined
+      tag === undefined &&
+      customTag === undefined
     ) {
       hashtag.isActive = !hashtag.isActive;
     }
@@ -220,20 +290,29 @@ export async function updateHashtag(req, res, next) {
     if (typeof examName === 'string' && examName.trim()) {
       hashtag.examName = examName.trim();
     }
-    if (typeof subExamName === 'string') {
-      hashtag.subExamName = subExamName.trim();
+    if (subExams !== undefined || subExamName !== undefined) {
+      const nextSubExams = parseStringArray(
+        subExams !== undefined ? subExams : subExamName
+      );
+      hashtag.subExams = nextSubExams;
+      hashtag.subExamName = nextSubExams.join(', ');
     }
-    if (languages !== undefined) {
-      hashtag.languages = normalizeLanguagesList(languages);
+    if (languages !== undefined || allowedLanguages !== undefined) {
+      hashtag.languages = normalizeLanguagesList(
+        languages !== undefined ? languages : allowedLanguages
+      );
     }
     if (typeof subjectName === 'string' && subjectName.trim()) {
-      hashtag.subjectName = subjectName.trim();
+      hashtag.subjectName = normalizeEnglishTopicLabel(subjectName);
     }
     if (typeof subSubjectName === 'string') {
-      hashtag.subSubjectName = subSubjectName.trim();
+      hashtag.subSubjectName = normalizeEnglishTopicLabel(subSubjectName);
     }
     if (typeof subTopicName === 'string') {
-      hashtag.subTopicName = subTopicName.trim();
+      hashtag.subTopicName = normalizeEnglishTopicLabel(subTopicName);
+    }
+    if (typeof customTag === 'string') {
+      hashtag.customTag = customTag.trim();
     }
     if (typeof tag === 'string' && tag.trim()) {
       const normalizedTag = tag
@@ -263,7 +342,8 @@ export async function updateHashtag(req, res, next) {
       {
         $set: {
           examName: hashtag.examName,
-          subExamName: hashtag.subExamName || '',
+          subExams: hashtag.subExams || [],
+          subExamName: (hashtag.subExams || []).join(', '),
           subjectName: hashtag.subjectName,
           subSubjectName: hashtag.subSubjectName || '',
           subTopicName: hashtag.subTopicName || '',
@@ -280,8 +360,202 @@ export async function updateHashtag(req, res, next) {
 }
 
 /**
+ * Bulk imports or seeds a structured exam taxonomy array:
+ * Each item can have:
+ * {
+ *   exam: "SSC",
+ *   subExams: ["CGL", "CHSL", ...],
+ *   allowedLanguages: ["English", "Hindi"],
+ *   subject: "General Awareness",
+ *   subSubjects: { "History": ["Ancient India", "Medieval India", ...] },
+ *   customTag: "ssc_core_gk"
+ * }
+ * OR flat items { exam, subExams, allowedLanguages, subject, subSubject, subTopic, tag }.
+ */
+export async function upsertTaxonomyItems(items) {
+  const flatTopics = [];
+
+  for (const entry of items) {
+    if (!entry || typeof entry !== 'object') continue;
+    const examName = String(entry.exam || entry.examName || '').trim();
+    const subjectName = normalizeEnglishTopicLabel(
+      entry.subject || entry.subjectName || ''
+    );
+    if (!examName || !subjectName) continue;
+
+    const subExams = parseStringArray(
+      entry.subExams !== undefined ? entry.subExams : entry.subExamName
+    );
+    const languages = normalizeLanguagesList(
+      entry.allowedLanguages !== undefined
+        ? entry.allowedLanguages
+        : entry.languages
+    );
+    const customTag = String(entry.customTag || '').trim();
+    const syllabusScope = String(entry.syllabusScope || '').trim();
+
+    if (
+      entry.subSubjects &&
+      typeof entry.subSubjects === 'object' &&
+      !Array.isArray(entry.subSubjects)
+    ) {
+      for (const [rawSubSubj, subTopicList] of Object.entries(
+        entry.subSubjects
+      )) {
+        const subSubjectName = normalizeEnglishTopicLabel(rawSubSubj);
+        const topics = Array.isArray(subTopicList) ? subTopicList : [];
+        if (topics.length === 0) {
+          flatTopics.push({
+            examName,
+            subExams,
+            languages,
+            subjectName,
+            subSubjectName,
+            subTopicName: '',
+            customTag,
+            syllabusScope,
+          });
+        } else {
+          for (const rawTopic of topics) {
+            const subTopicName = normalizeEnglishTopicLabel(rawTopic);
+            if (!subTopicName) continue;
+            flatTopics.push({
+              examName,
+              subExams,
+              languages,
+              subjectName,
+              subSubjectName,
+              subTopicName,
+              customTag,
+              syllabusScope,
+            });
+          }
+        }
+      }
+    } else {
+      flatTopics.push({
+        examName,
+        subExams,
+        languages,
+        subjectName,
+        subSubjectName: normalizeEnglishTopicLabel(
+          entry.subSubject || entry.subSubjectName || ''
+        ),
+        subTopicName: normalizeEnglishTopicLabel(
+          entry.subTopic || entry.subTopicName || ''
+        ),
+        tag: entry.tag ? String(entry.tag).trim() : '',
+        customTag,
+        syllabusScope,
+      });
+    }
+  }
+
+  let createdCount = 0;
+  let updatedCount = 0;
+
+  for (const item of flatTopics) {
+    const generatedTag = (
+      item.tag ||
+      buildDefaultTag({
+        examName: item.examName,
+        subExams: [],
+        subjectName: item.subjectName,
+        subSubjectName: item.subSubjectName,
+        subTopicName: item.subTopicName,
+      })
+    )
+      .replace(/^#+/, '')
+      .replace(/[^a-zA-Z0-9_]+/g, '_')
+      .toUpperCase();
+
+    if (!generatedTag) continue;
+
+    const existing = await Hashtag.findOne({
+      $or: [
+        { tag: generatedTag },
+        {
+          examName: item.examName,
+          subjectName: item.subjectName,
+          subSubjectName: item.subSubjectName,
+          subTopicName: item.subTopicName,
+        },
+      ],
+    });
+
+    if (existing) {
+      const mergedSubExams = Array.from(
+        new Set([...(existing.subExams || []), ...item.subExams])
+      );
+      const mergedLanguages = Array.from(
+        new Set([...(existing.languages || []), ...item.languages])
+      );
+      existing.subExams = mergedSubExams;
+      existing.subExamName = mergedSubExams.join(', ');
+      existing.languages =
+        mergedLanguages.length > 0 ? mergedLanguages : ['English'];
+      existing.subjectName = item.subjectName;
+      existing.subSubjectName = item.subSubjectName;
+      existing.subTopicName = item.subTopicName;
+      if (item.customTag) existing.customTag = item.customTag;
+      if (item.syllabusScope) existing.syllabusScope = item.syllabusScope;
+      existing.isActive = true;
+      await existing.save();
+      updatedCount += 1;
+    } else {
+      await Hashtag.create({
+        examName: item.examName,
+        subExams: item.subExams,
+        subExamName: item.subExams.join(', '),
+        languages: item.languages,
+        subjectName: item.subjectName,
+        subSubjectName: item.subSubjectName,
+        subTopicName: item.subTopicName,
+        tag: generatedTag,
+        customTag: item.customTag,
+        syllabusScope: item.syllabusScope,
+        isActive: true,
+      });
+      createdCount += 1;
+    }
+  }
+
+  invalidateHashtagsCache();
+
+  return {
+    createdCount,
+    updatedCount,
+    totalProcessed: flatTopics.length,
+  };
+}
+
+export async function bulkImportHashtags(req, res, next) {
+  try {
+    const { taxonomy, useSscPreset } = req.body || {};
+
+    const sourceList = useSscPreset
+      ? SSC_TAXONOMY_PRESET
+      : Array.isArray(taxonomy)
+        ? taxonomy
+        : null;
+
+    if (!sourceList || sourceList.length === 0) {
+      return res.status(400).json({
+        error:
+          'Provide a valid taxonomy JSON array or set useSscPreset: true',
+      });
+    }
+
+    const result = await upsertTaxonomyItems(sourceList);
+
+    return res.status(200).json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
  * Adds or removes a language across all topics matching an Exam (and optional Sub Exam).
- * Allows admins to manage allowed languages per Exam / Sub Exam cleanly.
  */
 export async function updateExamLanguages(req, res, next) {
   try {
@@ -299,12 +573,14 @@ export async function updateExamLanguages(req, res, next) {
     }
 
     const cleanExam = examName.trim();
-    const cleanSubExam = String(subExamName || '').trim();
+    const cleanSubExams = parseStringArray(subExamName).filter(
+      (s) => s.toUpperCase() !== 'ALL'
+    );
     const cleanLang = language.trim();
 
     const filter = { examName: cleanExam };
-    if (cleanSubExam && cleanSubExam !== 'ALL') {
-      filter.subExamName = cleanSubExam;
+    if (cleanSubExams.length > 0) {
+      filter.subExams = { $in: cleanSubExams };
     }
 
     const matchingTags = await Hashtag.find(filter);
@@ -349,16 +625,13 @@ export async function updateExamLanguages(req, res, next) {
     return res.status(200).json({
       updatedCount: matchingTags.length,
       examName: cleanExam,
-      subExamName: cleanSubExam,
+      subExams: cleanSubExams,
     });
   } catch (error) {
     return next(error);
   }
 }
 
-/**
- * Permanently deletes an admin-created hashtag / topic and cleans up associated quizzes.
- */
 export async function deleteHashtag(req, res, next) {
   try {
     const { id } = req.params;

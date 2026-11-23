@@ -7,15 +7,19 @@ import {
   SlidersHorizontal,
   X,
 } from 'lucide-react';
-import { formatHierarchyPath } from '../pages/CreateQuizView.jsx';
+import {
+  extractLanguagesArray,
+  extractSubExamsArray,
+} from '../lib/sscTaxonomyPreset.js';
 
 /**
- * Easy, flexible Exam + Multi-Language + Optional Sub-Exam/Subject/Topic filter modal:
- * - Exam: Required (must pick 1 exam)
- * - Languages: Select 1 or MORE languages (multi-select)
- * - Sub Exam, Subject, Sub Subject, Sub Topic: All optional (default to "All" so
- *   selecting an Exam + Language(s) immediately gives all questions in that exam,
- *   and users can narrow down to a specific Subject / Sub Topic only if needed).
+ * Refactored User Filter Modal (Filter Exam, Language & Topics):
+ * 1. EXAM (REQUIRED): Single-select chip.
+ * 2. LANGUAGE (SELECT 1 OR MORE): Multi-select chips + Select All toggle.
+ * 3. SUB EXAM (OPTIONAL): Unique, deduplicated sub-exam chips derived from subExams[] (single or multi-select).
+ * 4. SUBJECT (OPTIONAL): Dynamically filtered by Exam + Language + Sub Exam
+ *    (e.g., Stenographer hides Quantitative Aptitude; Hindi-only hides English Language; English-only hides General Hindi).
+ * 5. SUB SUBJECT & 6. SUB TOPIC (OPTIONAL / EXPANDABLE CHIPS): Revealed once a specific Subject is selected.
  */
 export default function ExamTopicPickerModal({
   exams = [],
@@ -31,9 +35,28 @@ export default function ExamTopicPickerModal({
       : exams[0] || '';
 
   const [examName, setExamName] = useState(initialExam);
-  const [subExamName, setSubExamName] = useState(
-    currentFilter?.subExamName || 'ALL'
-  );
+
+  // Selected sub-exams array (empty array means "All Sub Exams")
+  const [selectedSubExams, setSelectedSubExams] = useState(() => {
+    if (
+      Array.isArray(currentFilter?.subExams) &&
+      currentFilter.subExams.length > 0
+    ) {
+      return currentFilter.subExams;
+    }
+    if (
+      currentFilter?.subExamName &&
+      currentFilter.subExamName !== 'ALL'
+    ) {
+      return String(currentFilter.subExamName)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+    return [];
+  });
+
+  // Selected languages array (at least 1 required)
   const [selectedLanguages, setSelectedLanguages] = useState(() => {
     if (
       Array.isArray(currentFilter?.languages) &&
@@ -42,21 +65,22 @@ export default function ExamTopicPickerModal({
       return currentFilter.languages;
     }
     if (currentFilter?.language) {
-      return currentFilter.language
+      return String(currentFilter.language)
         .split(',')
         .map((l) => l.trim())
         .filter(Boolean);
     }
     return [];
   });
+
   const [subjectName, setSubjectName] = useState(
     currentFilter?.subjectName || 'ALL'
   );
   const [subSubjectName, setSubSubjectName] = useState(
     currentFilter?.subSubjectName || 'ALL'
   );
-  const [hashtagId, setHashtagId] = useState(
-    currentFilter?.hashtagId || 'ALL'
+  const [subTopicName, setSubTopicName] = useState(
+    currentFilter?.subTopicName || 'ALL'
   );
 
   useEffect(() => {
@@ -70,126 +94,182 @@ export default function ExamTopicPickerModal({
     [groupedByExam, examName]
   );
 
-  const subExamChoices = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          examTags.map((t) => (t.subExamName || '').trim()).filter(Boolean)
-        )
-      ),
-    [examTags]
-  );
-
-  const filteredBySubExam = useMemo(() => {
-    if (!subExamName || subExamName === 'ALL') return examTags;
-    return examTags.filter((t) => (t.subExamName || '').trim() === subExamName);
-  }, [examTags, subExamName]);
-
-  // Allowed languages configured by admin for the chosen Exam / Sub Exam
+  // All languages configured across this Exam
   const languageChoices = useMemo(() => {
-    const langs = filteredBySubExam.flatMap((t) =>
-      Array.isArray(t.languages) && t.languages.length > 0
-        ? t.languages
-        : ['English']
-    );
-    const unique = Array.from(
-      new Set(langs.map((l) => l.trim()).filter(Boolean))
-    );
+    const langs = examTags.flatMap((t) => extractLanguagesArray(t));
+    const unique = Array.from(new Set(langs));
     return unique.length > 0 ? unique : ['English'];
-  }, [filteredBySubExam]);
+  }, [examTags]);
 
-  // Ensure at least 1 valid language from languageChoices is selected
+  // Keep selectedLanguages valid and non-empty
   useEffect(() => {
-    const validSelected = selectedLanguages.filter((l) =>
-      languageChoices.includes(l)
-    );
-    if (validSelected.length === 0 && languageChoices.length > 0) {
-      // Default to all available languages for this exam so user never misses questions
+    const valid = selectedLanguages.filter((l) => languageChoices.includes(l));
+    if (valid.length === 0 && languageChoices.length > 0) {
       setSelectedLanguages([...languageChoices]);
-    } else if (validSelected.length !== selectedLanguages.length) {
-      setSelectedLanguages(validSelected);
+    } else if (valid.length !== selectedLanguages.length) {
+      setSelectedLanguages(valid);
     }
   }, [languageChoices, selectedLanguages]);
 
-  const subjectChoices = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          filteredBySubExam
-            .map((t) => (t.subjectName || '').trim())
-            .filter(Boolean)
-        )
-      ),
-    [filteredBySubExam]
-  );
+  // Unique, deduplicated Sub Exam chips derived from subExams arrays (never "CGL,CHSL")
+  const subExamChoices = useMemo(() => {
+    const allSubExams = examTags.flatMap((t) => extractSubExamsArray(t));
+    return Array.from(new Set(allSubExams));
+  }, [examTags]);
 
+  // Keep selectedSubExams valid when exam changes
+  useEffect(() => {
+    const valid = selectedSubExams.filter((se) => subExamChoices.includes(se));
+    if (valid.length !== selectedSubExams.length) {
+      setSelectedSubExams(valid);
+    }
+  }, [subExamChoices, selectedSubExams]);
+
+  // Smart filter topics by Exam + Selected Language(s) + Selected Sub Exam(s)
+  const topicsMatchingLangAndSubExam = useMemo(() => {
+    const activeLangSet = new Set(
+      selectedLanguages.map((l) => l.toLowerCase())
+    );
+    const activeSubExamSet = new Set(
+      selectedSubExams.map((se) => se.toLowerCase())
+    );
+
+    return examTags.filter((t) => {
+      // 1. Language compatibility check
+      const topicLangs = extractLanguagesArray(t).map((l) => l.toLowerCase());
+      const hasMatchingLang =
+        activeLangSet.size === 0 ||
+        topicLangs.some((l) => activeLangSet.has(l));
+      if (!hasMatchingLang) return false;
+
+      // 2. Sub-Exam compatibility check
+      if (activeSubExamSet.size === 0) return true;
+      const topicSubExams = extractSubExamsArray(t).map((se) =>
+        se.toLowerCase()
+      );
+      // Include topics that either belong to the selected sub-exam(s) or are global to the exam
+      return (
+        topicSubExams.length === 0 ||
+        topicSubExams.some((se) => activeSubExamSet.has(se))
+      );
+    });
+  }, [examTags, selectedLanguages, selectedSubExams]);
+
+  // 4. SUBJECT choices dynamically filtered by Exam + Language + Sub Exam
+  const subjectChoices = useMemo(() => {
+    return Array.from(
+      new Set(
+        topicsMatchingLangAndSubExam
+          .map((t) => (t.subjectName || '').trim())
+          .filter(Boolean)
+      )
+    );
+  }, [topicsMatchingLangAndSubExam]);
+
+  // If the previously selected subject is no longer compatible (e.g. Stenographer selected while Quantitative Aptitude was active, or Hindi-only selected while English Language was active), reset to ALL
   useEffect(() => {
     if (
       subjectName !== 'ALL' &&
-      subjectChoices.length > 0 &&
       !subjectChoices.includes(subjectName)
     ) {
       setSubjectName('ALL');
+      setSubSubjectName('ALL');
+      setSubTopicName('ALL');
     }
   }, [subjectChoices, subjectName]);
 
-  const filteredBySubject = useMemo(() => {
-    if (!subjectName || subjectName === 'ALL') return filteredBySubExam;
-    return filteredBySubExam.filter(
+  const topicsMatchingSubject = useMemo(() => {
+    if (!subjectName || subjectName === 'ALL') {
+      return topicsMatchingLangAndSubExam;
+    }
+    return topicsMatchingLangAndSubExam.filter(
       (t) => (t.subjectName || '').trim() === subjectName
     );
-  }, [filteredBySubExam, subjectName]);
+  }, [topicsMatchingLangAndSubExam, subjectName]);
 
-  const subSubjectChoices = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          filteredBySubject
-            .map((t) => (t.subSubjectName || '').trim())
-            .filter(Boolean)
-        )
-      ),
-    [filteredBySubject]
-  );
+  // 5. SUB SUBJECT choices (revealed when a specific Subject is selected)
+  const subSubjectChoices = useMemo(() => {
+    if (!subjectName || subjectName === 'ALL') return [];
+    return Array.from(
+      new Set(
+        topicsMatchingSubject
+          .map((t) => (t.subSubjectName || '').trim())
+          .filter(Boolean)
+      )
+    );
+  }, [topicsMatchingSubject, subjectName]);
 
-  const filteredTopicTags = useMemo(() => {
-    if (!subSubjectName || subSubjectName === 'ALL') return filteredBySubject;
-    return filteredBySubject.filter(
+  useEffect(() => {
+    if (
+      subSubjectName !== 'ALL' &&
+      !subSubjectChoices.includes(subSubjectName)
+    ) {
+      setSubSubjectName('ALL');
+      setSubTopicName('ALL');
+    }
+  }, [subSubjectChoices, subSubjectName]);
+
+  const topicsMatchingSubSubject = useMemo(() => {
+    if (!subSubjectName || subSubjectName === 'ALL') {
+      return topicsMatchingSubject;
+    }
+    return topicsMatchingSubject.filter(
       (t) => (t.subSubjectName || '').trim() === subSubjectName
     );
-  }, [filteredBySubject, subSubjectName]);
+  }, [topicsMatchingSubject, subSubjectName]);
+
+  // 6. SUB TOPIC choices (revealed when a specific Subject / Sub Subject is selected)
+  const subTopicChoices = useMemo(() => {
+    if (!subjectName || subjectName === 'ALL') return [];
+    return Array.from(
+      new Set(
+        topicsMatchingSubSubject
+          .map((t) => (t.subTopicName || '').trim())
+          .filter(Boolean)
+      )
+    );
+  }, [topicsMatchingSubSubject, subjectName]);
+
+  useEffect(() => {
+    if (subTopicName !== 'ALL' && !subTopicChoices.includes(subTopicName)) {
+      setSubTopicName('ALL');
+    }
+  }, [subTopicChoices, subTopicName]);
 
   const selectedTagDoc = useMemo(() => {
-    if (hashtagId && hashtagId !== 'ALL') {
-      return filteredTopicTags.find((t) => t._id === hashtagId) || null;
+    if (subTopicName && subTopicName !== 'ALL') {
+      return (
+        topicsMatchingSubSubject.find(
+          (t) => (t.subTopicName || '').trim() === subTopicName
+        ) || null
+      );
+    }
+    if (
+      subjectName !== 'ALL' &&
+      topicsMatchingSubSubject.length === 1
+    ) {
+      return topicsMatchingSubSubject[0];
     }
     return null;
-  }, [filteredTopicTags, hashtagId]);
+  }, [topicsMatchingSubSubject, subTopicName, subjectName]);
 
   function handleExamSelect(nextExam) {
     setExamName(nextExam);
-    setSubExamName('ALL');
+    setSelectedSubExams([]);
     const nextTags = groupedByExam[nextExam] || [];
     const nextLangs = Array.from(
-      new Set(
-        nextTags.flatMap((t) =>
-          Array.isArray(t.languages) && t.languages.length > 0
-            ? t.languages
-            : ['English']
-        )
-      )
+      new Set(nextTags.flatMap((t) => extractLanguagesArray(t)))
     );
     setSelectedLanguages(nextLangs.length > 0 ? nextLangs : ['English']);
     setSubjectName('ALL');
     setSubSubjectName('ALL');
-    setHashtagId('ALL');
+    setSubTopicName('ALL');
   }
 
   function handleToggleLanguage(lang) {
     setSelectedLanguages((prev) => {
       const exists = prev.includes(lang);
       if (exists) {
-        // Keep at least 1 language selected
         if (prev.length <= 1) return prev;
         return prev.filter((l) => l !== lang);
       }
@@ -197,44 +277,68 @@ export default function ExamTopicPickerModal({
     });
   }
 
-  function handleSelectAllLanguages() {
-    setSelectedLanguages([...languageChoices]);
+  function handleToggleSubExam(se) {
+    setSelectedSubExams((prev) => {
+      if (prev.includes(se)) {
+        return prev.filter((item) => item !== se);
+      }
+      return [...prev, se];
+    });
   }
+
+  // Real-time breadcrumb preview string
+  const liveBreadcrumb = useMemo(() => {
+    const subExamPart =
+      selectedSubExams.length > 0 ? selectedSubExams.join(' + ') : '';
+    const subjPart =
+      subjectName && subjectName !== 'ALL' ? subjectName : 'All Subjects';
+    const subSubjPart =
+      subjectName !== 'ALL' && subSubjectName && subSubjectName !== 'ALL'
+        ? subSubjectName
+        : '';
+    const topicPart =
+      subjectName !== 'ALL' && subTopicName && subTopicName !== 'ALL'
+        ? subTopicName
+        : '';
+
+    return [examName, subExamPart, subjPart, subSubjPart, topicPart]
+      .filter(Boolean)
+      .join(' › ');
+  }, [
+    examName,
+    selectedSubExams,
+    subjectName,
+    subSubjectName,
+    subTopicName,
+  ]);
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!examName) return;
 
     const finalLangs =
-      selectedLanguages.length > 0 ? selectedLanguages : [languageChoices[0] || 'English'];
+      selectedLanguages.length > 0
+        ? selectedLanguages
+        : [languageChoices[0] || 'English'];
 
-    const chosenTag = selectedTagDoc;
-
-    const pathParts = chosenTag
-      ? [formatHierarchyPath(chosenTag)]
-      : [
-          examName,
-          subExamName !== 'ALL' ? subExamName : '',
-          subjectName !== 'ALL' ? subjectName : 'All Subjects',
-          subSubjectName !== 'ALL' ? subSubjectName : '',
-        ].filter(Boolean);
-
-    const langLabel =
-      finalLangs.length === languageChoices.length && languageChoices.length > 1
-        ? 'All Langs'
-        : finalLangs.join(' + ');
+    const langLabel = finalLangs.join(' + ');
 
     onApply({
       examName,
-      subExamName: subExamName === 'ALL' ? '' : subExamName,
+      subExams: selectedSubExams,
+      subExamName: selectedSubExams.join(','),
       languages: finalLangs,
       language: finalLangs.join(','),
       subjectName: subjectName === 'ALL' ? '' : subjectName,
-      subSubjectName: subSubjectName === 'ALL' ? '' : subSubjectName,
-      subTopicName: chosenTag?.subTopicName || '',
-      hashtagId: chosenTag?._id || '',
-      tag: chosenTag?.tag || '',
-      label: `${pathParts.join(' › ')} (${langLabel})`,
+      subSubjectName:
+        subjectName === 'ALL' || subSubjectName === 'ALL'
+          ? ''
+          : subSubjectName,
+      subTopicName:
+        subjectName === 'ALL' || subTopicName === 'ALL' ? '' : subTopicName,
+      hashtagId: selectedTagDoc?._id || '',
+      tag: selectedTagDoc?.tag || '',
+      label: `${liveBreadcrumb} (${langLabel})`,
     });
   }
 
@@ -247,7 +351,7 @@ export default function ExamTopicPickerModal({
       className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/45 backdrop-blur-xs sm:items-center"
       role="dialog"
       aria-modal="true"
-      aria-label="Select Exam, Language and Subject"
+      aria-label="Filter Exam, Language and Topics"
     >
       <form
         onSubmit={handleSubmit}
@@ -265,7 +369,7 @@ export default function ExamTopicPickerModal({
                   : 'Filter Exam, Language & Topics'}
               </h2>
               <p className="text-[11px] text-slate-500">
-                Exam &amp; Language required &middot; Subject &amp; Topic optional
+                Exam &amp; Language required &middot; Sub-Exam &amp; Subject optional
               </p>
             </div>
           </div>
@@ -283,7 +387,7 @@ export default function ExamTopicPickerModal({
         </div>
 
         <div className="flex flex-col gap-3.5">
-          {/* 1. Exam Pills (Required) */}
+          {/* 1. EXAM (REQUIRED) */}
           <div>
             <label className="mb-1.5 block text-[11px] font-bold tracking-wider text-slate-500 uppercase">
               1. Exam (Required)
@@ -310,7 +414,7 @@ export default function ExamTopicPickerModal({
             </div>
           </div>
 
-          {/* 2. Language / Medium (Multi-Select: 1 or more languages) */}
+          {/* 2. LANGUAGE (SELECT 1 OR MORE) */}
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <label className="flex items-center gap-1 text-[11px] font-bold tracking-wider text-slate-500 uppercase">
@@ -320,7 +424,7 @@ export default function ExamTopicPickerModal({
               {languageChoices.length > 1 && !allLangsSelected && (
                 <button
                   type="button"
-                  onClick={handleSelectAllLanguages}
+                  onClick={() => setSelectedLanguages([...languageChoices])}
                   className="text-[11px] font-bold text-slate-700 underline hover:text-slate-900"
                 >
                   Select All
@@ -349,7 +453,7 @@ export default function ExamTopicPickerModal({
             </div>
           </div>
 
-          {/* 3. Sub Exam (Optional — defaults to All Sub Exams) */}
+          {/* 3. SUB EXAM (OPTIONAL — Unique deduplicated chips, never "CGL,CHSL") */}
           {subExamChoices.length > 0 && (
             <div>
               <label className="mb-1.5 block text-[11px] font-bold tracking-wider text-slate-500 uppercase">
@@ -358,86 +462,33 @@ export default function ExamTopicPickerModal({
               <div className="flex flex-wrap gap-1.5">
                 <button
                   type="button"
-                  onClick={() => {
-                    setSubExamName('ALL');
-                    setHashtagId('ALL');
-                  }}
-                  className={`rounded-full border px-3 py-1 text-xs font-bold transition ${
-                    subExamName === 'ALL'
-                      ? 'border-slate-900 bg-slate-900 text-white'
+                  onClick={() => setSelectedSubExams([])}
+                  className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold transition active:scale-95 ${
+                    selectedSubExams.length === 0
+                      ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
                       : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-white'
                   }`}
                 >
-                  All Sub Exams
+                  {selectedSubExams.length === 0 && (
+                    <Check className="h-3 w-3 stroke-[3]" />
+                  )}
+                  <span>All Sub Exams</span>
                 </button>
                 {subExamChoices.map((se) => {
-                  const active = subExamName === se;
+                  const active = selectedSubExams.includes(se);
                   return (
                     <button
                       key={se}
                       type="button"
-                      onClick={() => {
-                        setSubExamName(se);
-                        setHashtagId('ALL');
-                      }}
-                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                        active
-                          ? 'border-slate-900 bg-slate-900 text-white'
-                          : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-white'
-                      }`}
-                    >
-                      {se}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* 4. Subject Pills (Optional — defaults to All Subjects) */}
-          {subjectChoices.length > 0 && (
-            <div>
-              <label className="mb-1.5 block text-[11px] font-bold tracking-wider text-slate-500 uppercase">
-                4. Subject (Optional)
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSubjectName('ALL');
-                    setSubSubjectName('ALL');
-                    setHashtagId('ALL');
-                  }}
-                  className={`inline-flex items-center gap-1 rounded-full border px-3.5 py-1.5 text-xs font-bold transition active:scale-95 ${
-                    subjectName === 'ALL'
-                      ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
-                      : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
-                  }`}
-                >
-                  {subjectName === 'ALL' && (
-                    <Check className="h-3 w-3 stroke-[3]" />
-                  )}
-                  <span>All Subjects</span>
-                </button>
-                {subjectChoices.map((subj) => {
-                  const active = subjectName === subj;
-                  return (
-                    <button
-                      key={subj}
-                      type="button"
-                      onClick={() => {
-                        setSubjectName(subj);
-                        setSubSubjectName('ALL');
-                        setHashtagId('ALL');
-                      }}
-                      className={`inline-flex items-center gap-1 rounded-full border px-3.5 py-1.5 text-xs font-bold transition active:scale-95 ${
+                      onClick={() => handleToggleSubExam(se)}
+                      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold transition active:scale-95 ${
                         active
                           ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
                           : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
                       }`}
                     >
                       {active && <Check className="h-3 w-3 stroke-[3]" />}
-                      <span>{subj}</span>
+                      <span>{se}</span>
                     </button>
                   );
                 })}
@@ -445,76 +496,154 @@ export default function ExamTopicPickerModal({
             </div>
           )}
 
-          {/* 5. Sub Subject & 6. Sub Topic (Optional drill-down when a Subject is chosen) */}
-          {subjectName !== 'ALL' &&
-            (subSubjectChoices.length > 0 || filteredTopicTags.length > 1) && (
-              <div className="grid grid-cols-2 gap-2">
-                {subSubjectChoices.length > 0 && (
-                  <div>
-                    <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-500 uppercase">
-                      5. Sub Subject (Optional)
-                    </label>
-                    <select
-                      value={subSubjectName}
-                      onChange={(e) => {
-                        setSubSubjectName(e.target.value);
-                        setHashtagId('ALL');
-                      }}
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
-                    >
-                      <option value="ALL">All Sub Subjects</option>
-                      {subSubjectChoices.map((ss) => (
-                        <option key={ss} value={ss}>
-                          {ss}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+          {/* 4. SUBJECT (OPTIONAL — Dynamically filtered by Exam + Language + Sub Exam) */}
+          <div>
+            <label className="mb-1.5 block text-[11px] font-bold tracking-wider text-slate-500 uppercase">
+              4. Subject (Optional)
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setSubjectName('ALL');
+                  setSubSubjectName('ALL');
+                  setSubTopicName('ALL');
+                }}
+                className={`inline-flex items-center gap-1 rounded-full border px-3.5 py-1.5 text-xs font-bold transition active:scale-95 ${
+                  subjectName === 'ALL'
+                    ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
+                }`}
+              >
+                {subjectName === 'ALL' && (
+                  <Check className="h-3 w-3 stroke-[3]" />
                 )}
-
-                {filteredTopicTags.length > 1 && (
-                  <div
-                    className={
-                      subSubjectChoices.length === 0 ? 'col-span-2' : ''
-                    }
+                <span>All Subjects</span>
+              </button>
+              {subjectChoices.map((subj) => {
+                const active = subjectName === subj;
+                return (
+                  <button
+                    key={subj}
+                    type="button"
+                    onClick={() => {
+                      setSubjectName(subj);
+                      setSubSubjectName('ALL');
+                      setSubTopicName('ALL');
+                    }}
+                    className={`inline-flex items-center gap-1 rounded-full border px-3.5 py-1.5 text-xs font-bold transition active:scale-95 ${
+                      active
+                        ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
+                    }`}
                   >
-                    <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-500 uppercase">
-                      6. Sub Topic (Optional)
-                    </label>
-                    <select
-                      value={hashtagId}
-                      onChange={(e) => setHashtagId(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
-                    >
-                      <option value="ALL">All Topics in {subjectName}</option>
-                      {filteredTopicTags.map((t) => (
-                        <option key={t._id} value={t._id}>
-                          {t.subTopicName || t.subSubjectName || t.subjectName} (#{t.tag})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-            )}
+                    {active && <Check className="h-3 w-3 stroke-[3]" />}
+                    <span>{subj}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-          {/* Current Selection Summary */}
+          {/* 5. SUB SUBJECT (OPTIONAL / EXPANDABLE CHIPS — Revealed when a Subject is selected) */}
+          {subjectName !== 'ALL' && subSubjectChoices.length > 0 && (
+            <div>
+              <label className="mb-1.5 block text-[11px] font-bold tracking-wider text-slate-500 uppercase">
+                5. Sub Subject (Optional)
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSubSubjectName('ALL');
+                    setSubTopicName('ALL');
+                  }}
+                  className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold transition active:scale-95 ${
+                    subSubjectName === 'ALL'
+                      ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  {subSubjectName === 'ALL' && (
+                    <Check className="h-3 w-3 stroke-[3]" />
+                  )}
+                  <span>All in {subjectName}</span>
+                </button>
+                {subSubjectChoices.map((ss) => {
+                  const active = subSubjectName === ss;
+                  return (
+                    <button
+                      key={ss}
+                      type="button"
+                      onClick={() => {
+                        setSubSubjectName(ss);
+                        setSubTopicName('ALL');
+                      }}
+                      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold transition active:scale-95 ${
+                        active
+                          ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
+                          : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
+                      }`}
+                    >
+                      {active && <Check className="h-3 w-3 stroke-[3]" />}
+                      <span>{ss}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 6. SUB TOPIC (OPTIONAL / EXPANDABLE CHIPS — Revealed when a Subject is selected) */}
+          {subjectName !== 'ALL' && subTopicChoices.length > 0 && (
+            <div>
+              <label className="mb-1.5 block text-[11px] font-bold tracking-wider text-slate-500 uppercase">
+                6. Sub Topic (Optional)
+              </label>
+              <div className="flex max-h-36 flex-wrap gap-1.5 overflow-y-auto pr-1">
+                <button
+                  type="button"
+                  onClick={() => setSubTopicName('ALL')}
+                  className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold transition active:scale-95 ${
+                    subTopicName === 'ALL'
+                      ? 'border-emerald-600 bg-emerald-600 text-white shadow-2xs'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-white'
+                  }`}
+                >
+                  {subTopicName === 'ALL' && (
+                    <Check className="h-3 w-3 stroke-[3]" />
+                  )}
+                  <span>All Topics</span>
+                </button>
+                {subTopicChoices.map((st) => {
+                  const active = subTopicName === st;
+                  return (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setSubTopicName(st)}
+                      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold transition active:scale-95 ${
+                        active
+                          ? 'border-emerald-600 bg-emerald-600 text-white shadow-2xs'
+                          : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
+                      }`}
+                    >
+                      {active && <Check className="h-3 w-3 stroke-[3]" />}
+                      <span>{st}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Live Breadcrumb Preview */}
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs">
             <div className="flex flex-wrap items-center gap-1 font-bold text-slate-900">
               <span>Showing:</span>
               <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
               <span>
-                {selectedTagDoc
-                  ? formatHierarchyPath(selectedTagDoc)
-                  : [
-                      examName,
-                      subExamName !== 'ALL' ? subExamName : '',
-                      subjectName !== 'ALL' ? subjectName : 'All Subjects',
-                      subSubjectName !== 'ALL' ? subSubjectName : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' › ')}{' '}
-                ({selectedLanguages.join(' + ')})
+                {liveBreadcrumb} ({selectedLanguages.join(' + ')})
               </span>
             </div>
             {selectedTagDoc?.syllabusScope && (

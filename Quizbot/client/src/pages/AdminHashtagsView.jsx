@@ -6,6 +6,7 @@ import {
   Edit3,
   Eye,
   EyeOff,
+  FileJson,
   Flag,
   Globe,
   Loader2,
@@ -14,27 +15,45 @@ import {
   Save,
   Search,
   Shield,
+  Sparkles,
   Trash2,
   UserCheck,
   UserPlus,
   X,
 } from 'lucide-react';
 import { apiRequest } from '../lib/api.js';
+import {
+  SSC_SUB_EXAM_PRESETS,
+  SSC_TAXONOMY_JSON_PRESET,
+  extractLanguagesArray,
+  extractSubExamsArray,
+} from '../lib/sscTaxonomyPreset.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import EditQuizModal from '../components/EditQuizModal.jsx';
 import { formatHierarchyPath } from './CreateQuizView.jsx';
 
+function parseCommaChips(raw) {
+  if (!raw) return [];
+  const list = Array.isArray(raw)
+    ? raw.flatMap((s) => String(s || '').split(','))
+    : String(raw).split(',');
+  return Array.from(new Set(list.map((s) => s.trim()).filter(Boolean)));
+}
+
 export default function AdminHashtagsView({ onOpenCreatorProfile }) {
   const { user, isOfflinePreview } = useAuth();
-  const [subTab, setSubTab] = useState('creators'); // 'creators' | 'hashtags' | 'escalations'
+  const [subTab, setSubTab] = useState('hashtags'); // 'creators' | 'hashtags' | 'escalations'
 
-  // Hashtags / 5-Level Taxonomy + Languages state
+  // Hashtags / 5-Level Taxonomy + SubExams Array + Languages Array state
   const [groupedByExam, setGroupedByExam] = useState({});
   const [exams, setExams] = useState([]);
   const [loadingTags, setLoadingTags] = useState(true);
-  const [examName, setExamName] = useState('');
-  const [subExamName, setSubExamName] = useState('');
-  const [languagesInput, setLanguagesInput] = useState('English');
+
+  const [examName, setExamName] = useState('SSC');
+  const [subExamsList, setSubExamsList] = useState(['CGL', 'CHSL']);
+  const [subExamDraft, setSubExamDraft] = useState('');
+  const [languagesList, setLanguagesList] = useState(['English', 'Hindi']);
+  const [languageDraft, setLanguageDraft] = useState('');
   const [subjectName, setSubjectName] = useState('');
   const [subSubjectName, setSubSubjectName] = useState('');
   const [subTopicName, setSubTopicName] = useState('');
@@ -42,11 +61,17 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
   const [syllabusScope, setSyllabusScope] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Inline Edit Tag state (admin can edit any existing tag's hierarchy & languages)
+  // Bulk JSON Import modal state
+  const [showJsonImportModal, setShowJsonImportModal] = useState(false);
+  const [jsonImportText, setJsonImportText] = useState('');
+  const [importingJson, setImportingJson] = useState(false);
+  const [seedingSsc, setSeedingSsc] = useState(false);
+
+  // Inline Edit Tag state (admin can edit any existing tag's hierarchy, subExams[], & languages[])
   const [editingTagId, setEditingTagId] = useState(null);
   const [editTagForm, setEditTagForm] = useState({
     examName: '',
-    subExamName: '',
+    subExams: '',
     languages: '',
     subjectName: '',
     subSubjectName: '',
@@ -79,19 +104,20 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
 
   const loadHashtags = useCallback(async () => {
     if (isOfflinePreview) {
-      setExams(['UPSC', 'SSC']);
+      setExams(['SSC']);
       setGroupedByExam({
-        UPSC: [
+        SSC: [
           {
             _id: 'p1',
-            examName: 'UPSC',
-            subExamName: 'CSE Prelims',
+            examName: 'SSC',
+            subExams: ['CGL', 'CHSL', 'CPO', 'MTS', 'GD'],
+            subExamName: 'CGL, CHSL, CPO, MTS, GD',
             languages: ['English', 'Hindi'],
-            subjectName: 'History',
-            subSubjectName: 'Ancient India',
-            subTopicName: 'Indus Valley',
-            tag: 'UPSC_CSE_HISTORY_ANCIENT_IVC',
-            syllabusScope: 'Ancient, Medieval & Modern Indian History',
+            subjectName: 'Quantitative Aptitude',
+            subSubjectName: 'Arithmetic',
+            subTopicName: 'Percentage',
+            tag: 'SSC_QUANTITATIVE_APTITUDE_ARITHMETIC_PERCENTAGE',
+            syllabusScope: 'Percentage, Profit & Loss, Ratio & Proportion',
             isActive: true,
             quizCount: 14,
           },
@@ -171,19 +197,6 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
     loadUsers();
   }, [loadHashtags, loadEscalations, loadUsers]);
 
-  // Auto-populate languagesInput when admin types an existing Exam / Sub Exam
-  useEffect(() => {
-    const cleanExam = examName.trim();
-    if (!cleanExam || !groupedByExam[cleanExam]) return;
-    const cleanSub = subExamName.trim().toLowerCase();
-    const match = groupedByExam[cleanExam].find(
-      (item) => (item.subExamName || '').trim().toLowerCase() === cleanSub
-    );
-    if (match && Array.isArray(match.languages) && match.languages.length > 0) {
-      setLanguagesInput(match.languages.join(', '));
-    }
-  }, [examName, subExamName, groupedByExam]);
-
   if (user?.role !== 'admin') {
     return (
       <div className="flex h-dvh items-center justify-center bg-[#F8FAFC] px-6 text-center text-sm text-slate-500">
@@ -192,9 +205,33 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
     );
   }
 
+  function handleAddSubExamChip(rawVal) {
+    const tokens = parseCommaChips(rawVal);
+    if (tokens.length === 0) return;
+    setSubExamsList((prev) => Array.from(new Set([...prev, ...tokens])));
+    setSubExamDraft('');
+  }
+
+  function handleRemoveSubExamChip(chip) {
+    setSubExamsList((prev) => prev.filter((item) => item !== chip));
+  }
+
+  function handleAddLanguageChip(rawVal) {
+    const tokens = parseCommaChips(rawVal);
+    if (tokens.length === 0) return;
+    setLanguagesList((prev) => Array.from(new Set([...prev, ...tokens])));
+    setLanguageDraft('');
+  }
+
+  function handleRemoveLanguageChip(chip) {
+    setLanguagesList((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((item) => item !== chip);
+    });
+  }
+
   const suggestedTag = [
     examName,
-    subExamName,
     subjectName,
     subSubjectName,
     subTopicName,
@@ -219,6 +256,21 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
       return;
     }
 
+    // Automatically merge any uncommitted comma-separated text in subExamDraft / languageDraft
+    const finalSubExams = Array.from(
+      new Set([...subExamsList, ...parseCommaChips(subExamDraft)])
+    );
+    const finalLanguages = Array.from(
+      new Set([...languagesList, ...parseCommaChips(languageDraft)])
+    );
+
+    setSubExamsList(finalSubExams);
+    setSubExamDraft('');
+    if (finalLanguages.length > 0) {
+      setLanguagesList(finalLanguages);
+    }
+    setLanguageDraft('');
+
     setSubmitting(true);
     try {
       const finalTag = (tag.trim() || suggestedTag)
@@ -228,8 +280,8 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
         method: 'POST',
         body: {
           examName: examName.trim(),
-          subExamName: subExamName.trim(),
-          languages: languagesInput,
+          subExams: finalSubExams,
+          languages: finalLanguages.length > 0 ? finalLanguages : ['English'],
           subjectName: subjectName.trim(),
           subSubjectName: subSubjectName.trim(),
           subTopicName: subTopicName.trim(),
@@ -249,16 +301,77 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
     }
   }
 
+  async function handleSeedOfficialSsc() {
+    if (seedingSsc || isOfflinePreview) return;
+    setError('');
+    setSuccess('');
+    setSeedingSsc(true);
+    try {
+      const data = await apiRequest('/api/hashtags/bulk-import', {
+        method: 'POST',
+        body: { useSscPreset: true },
+      });
+      setSuccess(
+        `SSC Syllabus synced! Created ${data.createdCount} topics, updated ${data.updatedCount} topics (${data.totalProcessed} total).`
+      );
+      await loadHashtags();
+    } catch (err) {
+      setError(err.message || 'Failed to seed SSC syllabus');
+    } finally {
+      setSeedingSsc(false);
+    }
+  }
+
+  async function handleBulkJsonImport(e) {
+    e.preventDefault();
+    if (!jsonImportText.trim() || importingJson) return;
+    setError('');
+    setSuccess('');
+
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonImportText.trim());
+      if (!Array.isArray(parsed)) {
+        setError('JSON must be an array of taxonomy objects ([ ... ]).');
+        return;
+      }
+    } catch (parseErr) {
+      setError(`Invalid JSON syntax: ${parseErr.message}`);
+      return;
+    }
+
+    if (isOfflinePreview) {
+      setError('Connect MongoDB & API server to import JSON taxonomy.');
+      return;
+    }
+
+    setImportingJson(true);
+    try {
+      const data = await apiRequest('/api/hashtags/bulk-import', {
+        method: 'POST',
+        body: { taxonomy: parsed },
+      });
+      setShowJsonImportModal(false);
+      setJsonImportText('');
+      setSuccess(
+        `Imported ${data.totalProcessed} topics! (${data.createdCount} created, ${data.updatedCount} updated)`
+      );
+      await loadHashtags();
+    } catch (err) {
+      setError(err.message || 'Failed to import taxonomy JSON');
+    } finally {
+      setImportingJson(false);
+    }
+  }
+
   function handleStartEditTag(item) {
     setError('');
     setSuccess('');
     setEditingTagId(item._id);
     setEditTagForm({
       examName: item.examName || '',
-      subExamName: item.subExamName || '',
-      languages: Array.isArray(item.languages)
-        ? item.languages.join(', ')
-        : 'English',
+      subExams: extractSubExamsArray(item).join(', '),
+      languages: extractLanguagesArray(item).join(', '),
       subjectName: item.subjectName || '',
       subSubjectName: item.subSubjectName || '',
       subTopicName: item.subTopicName || '',
@@ -284,8 +397,8 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
         method: 'PATCH',
         body: {
           examName: editTagForm.examName.trim(),
-          subExamName: editTagForm.subExamName.trim(),
-          languages: editTagForm.languages,
+          subExams: parseCommaChips(editTagForm.subExams),
+          languages: parseCommaChips(editTagForm.languages),
           subjectName: editTagForm.subjectName.trim(),
           subSubjectName: editTagForm.subSubjectName.trim(),
           subTopicName: editTagForm.subTopicName.trim(),
@@ -303,44 +416,41 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
     }
   }
 
-  /**
-   * Pre-fills the top create form from an existing tag card so the admin can
-   * add another Sub Exam, Subject, Sub Subject, or Sub Topic with 1 tap.
-   */
   function handleBranchFromTag(item, level) {
-    const langs =
-      Array.isArray(item.languages) && item.languages.length > 0
-        ? item.languages.join(', ')
-        : 'English';
+    const langs = extractLanguagesArray(item);
+    const subExams = extractSubExamsArray(item);
 
     setExamName(item.examName || '');
-    setLanguagesInput(langs);
+    setLanguagesList(langs);
     setTag('');
     setSyllabusScope('');
 
     if (level === 'subExam') {
-      setSubExamName('');
+      setSubExamsList([]);
       setSubjectName('');
       setSubSubjectName('');
       setSubTopicName('');
     } else if (level === 'subject') {
-      setSubExamName(item.subExamName || '');
+      setSubExamsList(subExams);
       setSubjectName('');
       setSubSubjectName('');
       setSubTopicName('');
     } else if (level === 'subSubject') {
-      setSubExamName(item.subExamName || '');
+      setSubExamsList(subExams);
       setSubjectName(item.subjectName || '');
       setSubSubjectName('');
       setSubTopicName('');
     } else if (level === 'subTopic') {
-      setSubExamName(item.subExamName || '');
+      setSubExamsList(subExams);
       setSubjectName(item.subjectName || '');
       setSubSubjectName(item.subSubjectName || '');
       setSubTopicName('');
     }
 
-    createFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    createFormRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
   }
 
   async function handleToggleActive(item) {
@@ -364,21 +474,15 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
     setSuccess('');
 
     try {
-      await apiRequest('/api/hashtags/exam-languages', {
+      const nextLangs = Array.from(
+        new Set([...extractLanguagesArray(item), ...parseCommaChips(rawNewLang)])
+      );
+      await apiRequest(`/api/hashtags/${item._id}`, {
         method: 'PATCH',
-        body: {
-          examName: item.examName,
-          subExamName: item.subExamName || '',
-          action: 'add',
-          language: rawNewLang,
-        },
+        body: { languages: nextLangs },
       });
       setNewLangByTag((prev) => ({ ...prev, [item._id]: '' }));
-      setSuccess(
-        `Added language "${rawNewLang}" to ${item.examName}${
-          item.subExamName ? ` › ${item.subExamName}` : ''
-        }`
-      );
+      setSuccess(`Added language "${rawNewLang}" to #${item.tag}`);
       await loadHashtags();
     } catch (err) {
       setError(err.message || 'Failed to add language');
@@ -390,21 +494,21 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
     setError('');
     setSuccess('');
 
+    const currentLangs = extractLanguagesArray(item);
+    const nextLangs = currentLangs.filter(
+      (l) => l.toLowerCase() !== langToRemove.toLowerCase()
+    );
+    if (nextLangs.length === 0) {
+      setError('At least one language must remain on the topic.');
+      return;
+    }
+
     try {
-      await apiRequest('/api/hashtags/exam-languages', {
+      await apiRequest(`/api/hashtags/${item._id}`, {
         method: 'PATCH',
-        body: {
-          examName: item.examName,
-          subExamName: item.subExamName || '',
-          action: 'remove',
-          language: langToRemove,
-        },
+        body: { languages: nextLangs },
       });
-      setSuccess(
-        `Removed language "${langToRemove}" from ${item.examName}${
-          item.subExamName ? ` › ${item.subExamName}` : ''
-        }`
-      );
+      setSuccess(`Removed language "${langToRemove}" from #${item.tag}`);
       await loadHashtags();
     } catch (err) {
       setError(err.message || 'Failed to remove language');
@@ -517,7 +621,7 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
             Admin Console
           </h1>
           <p className="text-xs text-slate-500">
-            Tap any creator to open their profile and edit or delete their quizzes.
+            Manage shared Sub-Exam syllabi, creators &amp; flagged quizzes.
           </p>
         </div>
       </div>
@@ -575,7 +679,6 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
 
       {subTab === 'creators' ? (
         <>
-          {/* Quick Approve by Telegram ID or @username */}
           <form
             onSubmit={handleApproveByIdentifier}
             className="mb-4 flex flex-col gap-2.5 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs"
@@ -607,7 +710,6 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
             </div>
           </form>
 
-          {/* Search & Open Creator Profile to Edit/Delete their Quizzes */}
           <div className="mb-3 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-2xs">
             <Search className="h-4 w-4 text-slate-400" />
             <input
@@ -786,23 +888,65 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
         )
       ) : (
         <>
-          {/* 5-Level Exam Taxonomy + Languages Form */}
+          {/* Quick Seed / Bulk JSON Import Toolbar */}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-2xs">
+            <div>
+              <p className="text-xs font-bold text-slate-900">
+                Taxonomy Bulk Tools
+              </p>
+              <p className="text-[11px] text-slate-500">
+                Seed the complete SSC syllabus or paste custom JSON
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={seedingSsc}
+                onClick={handleSeedOfficialSsc}
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-[11px] font-bold text-white shadow-2xs hover:bg-emerald-500 active:scale-95 disabled:opacity-60"
+              >
+                {seedingSsc ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3 w-3" />
+                )}
+                <span>{seedingSsc ? 'Seeding...' : 'Seed SSC Syllabus'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setJsonImportText(
+                    JSON.stringify(SSC_TAXONOMY_JSON_PRESET, null, 2)
+                  );
+                  setShowJsonImportModal(true);
+                }}
+                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-900 px-3 py-1.5 text-[11px] font-bold text-white shadow-2xs hover:bg-slate-800 active:scale-95"
+              >
+                <FileJson className="h-3 w-3" />
+                <span>Bulk JSON Import</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 5-Level Exam Taxonomy + Multi-Chip SubExams[] + Languages[] Form */}
           <form
             ref={createFormRef}
             onSubmit={handleCreateHashtag}
-            className="mb-6 flex flex-col gap-2.5 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs"
+            className="mb-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs"
           >
             <div className="flex items-center justify-between">
               <h2 className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
-                Add Exam Topic &amp; Allowed Languages
+                Add Exam Topic (Shared Sub-Exams Array)
               </h2>
-              {(examName || subExamName || subjectName) && (
+              {(examName || subExamsList.length > 0 || subjectName) && (
                 <button
                   type="button"
                   onClick={() => {
-                    setExamName('');
-                    setSubExamName('');
-                    setLanguagesInput('English');
+                    setExamName('SSC');
+                    setSubExamsList([]);
+                    setSubExamDraft('');
+                    setLanguagesList(['English', 'Hindi']);
+                    setLanguageDraft('');
                     setSubjectName('');
                     setSubSubjectName('');
                     setSubTopicName('');
@@ -811,69 +955,205 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
                   }}
                   className="text-[11px] font-semibold text-slate-500 hover:text-slate-900"
                 >
-                  Clear form
+                  Reset
                 </button>
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            {/* 1. Exam */}
+            <div>
+              <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                1. Exam *
+              </label>
               <input
                 type="text"
                 required
                 value={examName}
                 onChange={(e) => setExamName(e.target.value)}
-                placeholder="1. Exam * (e.g. PSC, SSC)"
-                className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900 focus:bg-white"
-              />
-              <input
-                type="text"
-                value={subExamName}
-                onChange={(e) => setSubExamName(e.target.value)}
-                placeholder="2. Sub Exam (e.g. LDC Prelims)"
-                className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900 focus:bg-white"
+                placeholder="e.g. SSC, PSC, UPSC"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900 focus:bg-white"
               />
             </div>
 
-            {/* Allowed Languages for this Exam / Sub Exam */}
+            {/* 2. Sub Exams (Multi-Select Chips + Quick SSC Presets) */}
+            <div>
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-1">
+                <label className="text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                  2. Sub Exams (Array of Chips — Shared Syllabus)
+                </label>
+                {subExamsList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSubExamsList([])}
+                    className="text-[10px] font-semibold text-slate-400 hover:text-rose-600"
+                  >
+                    Clear chips
+                  </button>
+                )}
+              </div>
+
+              {/* Preset Buttons (All SSC, CGL + CHSL + CPO, MTS + GD, etc.) */}
+              <div className="mb-2 flex flex-wrap gap-1">
+                {SSC_SUB_EXAM_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => setSubExamsList([...preset.subExams])}
+                    className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[10px] font-bold text-slate-700 hover:border-slate-300 hover:bg-slate-100 active:scale-95"
+                  >
+                    + {preset.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Active Sub-Exam Chips */}
+              {subExamsList.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  {subExamsList.map((se) => (
+                    <span
+                      key={se}
+                      className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2.5 py-0.5 text-[11px] font-bold text-white"
+                    >
+                      <span>{se}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveSubExamChip(se)}
+                        className="rounded-full text-slate-300 hover:text-white"
+                        aria-label={`Remove ${se}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Sub-Exam Chip Input (Splits on comma or Enter) */}
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={subExamDraft}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.includes(',')) {
+                      handleAddSubExamChip(val);
+                    } else {
+                      setSubExamDraft(val);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && subExamDraft.trim()) {
+                      e.preventDefault();
+                      handleAddSubExamChip(subExamDraft);
+                    }
+                  }}
+                  placeholder="Type sub-exams (e.g. CGL, CHSL, MTS) & press comma/Add"
+                  className="flex-1 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900 focus:bg-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAddSubExamChip(subExamDraft)}
+                  className="rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-bold text-slate-800 hover:bg-slate-200"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            {/* Allowed Languages (Array of Chips) */}
             <div>
               <label className="mb-1 flex items-center gap-1 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
                 <Globe className="h-3 w-3" />
-                <span>Allowed Languages (comma-separated) *</span>
+                <span>Allowed Languages (Array) *</span>
               </label>
-              <input
-                type="text"
-                required
-                value={languagesInput}
-                onChange={(e) => setLanguagesInput(e.target.value)}
-                placeholder="e.g. English, Malayalam, Hindi"
-                className="w-full rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs font-medium text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900 focus:bg-white"
-              />
+              <div className="mb-1.5 flex flex-wrap gap-1.5">
+                {languagesList.map((lang) => (
+                  <span
+                    key={lang}
+                    className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800"
+                  >
+                    <span>{lang}</span>
+                    {languagesList.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveLanguageChip(lang)}
+                        className="text-emerald-600 hover:text-rose-600"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </span>
+                ))}
+                {['English', 'Hindi', 'Malayalam', 'Tamil'].map((presetLang) =>
+                  !languagesList.includes(presetLang) ? (
+                    <button
+                      key={presetLang}
+                      type="button"
+                      onClick={() => handleAddLanguageChip(presetLang)}
+                      className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600 hover:bg-slate-100"
+                    >
+                      + {presetLang}
+                    </button>
+                  ) : null
+                )}
+              </div>
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={languageDraft}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.includes(',')) {
+                      handleAddLanguageChip(val);
+                    } else {
+                      setLanguageDraft(val);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && languageDraft.trim()) {
+                      e.preventDefault();
+                      handleAddLanguageChip(languageDraft);
+                    }
+                  }}
+                  placeholder="Add custom language..."
+                  className="flex-1 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900 focus:bg-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAddLanguageChip(languageDraft)}
+                  className="rounded-xl border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-200"
+                >
+                  Add
+                </button>
+              </div>
             </div>
 
+            {/* 3. Subject & 4. Sub Subject */}
             <div className="grid grid-cols-2 gap-2">
               <input
                 type="text"
                 required
                 value={subjectName}
                 onChange={(e) => setSubjectName(e.target.value)}
-                placeholder="3. Subject * (e.g. History)"
+                placeholder="3. Subject * (e.g. General Awareness)"
                 className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900 focus:bg-white"
               />
               <input
                 type="text"
                 value={subSubjectName}
                 onChange={(e) => setSubSubjectName(e.target.value)}
-                placeholder="4. Sub Subject (e.g. Kerala)"
+                placeholder="4. Sub Subject (e.g. History)"
                 className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900 focus:bg-white"
               />
             </div>
 
+            {/* 5. Sub Topic & Custom Tag */}
             <div className="grid grid-cols-2 gap-2">
               <input
                 type="text"
                 value={subTopicName}
                 onChange={(e) => setSubTopicName(e.target.value)}
-                placeholder="5. Sub Topic (e.g. Renaissance)"
+                placeholder="5. Sub Topic (e.g. Ancient India)"
                 className="rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900 focus:bg-white"
               />
               <input
@@ -911,41 +1191,55 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
             </button>
           </form>
 
-          {/* Grouped Topics List with Edit, Branch (+Sub Exam/+Subject/+Sub Subject/+Sub Topic), Language Add/Remove & Tag Delete */}
+          {/* Grouped Topics List */}
           {loadingTags ? (
             <div className="flex justify-center py-10">
               <Loader2 className="h-5 w-5 animate-spin text-slate-700" />
             </div>
           ) : exams.length === 0 ? (
             <p className="py-8 text-center text-xs text-slate-500">
-              No exam topics configured yet.
+              No exam topics configured yet. Tap &ldquo;Seed SSC Syllabus&rdquo;
+              above to load the structured SSC taxonomy.
             </p>
           ) : (
             <div className="flex flex-col gap-5">
               {exams.map((exam) => (
                 <div key={exam} className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
-                      {exam}
+                      {exam} ({(groupedByExam[exam] || []).length} topics)
                     </h3>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const first = groupedByExam[exam]?.[0];
-                        if (first) handleBranchFromTag(first, 'subExam');
-                      }}
-                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50"
-                    >
-                      <Plus className="h-2.5 w-2.5" />
-                      <span>Add Sub Exam to {exam}</span>
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setJsonImportText(
+                            JSON.stringify(SSC_TAXONOMY_JSON_PRESET, null, 2)
+                          );
+                          setShowJsonImportModal(true);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50"
+                      >
+                        <FileJson className="h-2.5 w-2.5" />
+                        <span>Bulk JSON Import</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const first = groupedByExam[exam]?.[0];
+                          if (first) handleBranchFromTag(first, 'subExam');
+                        }}
+                        className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50"
+                      >
+                        <Plus className="h-2.5 w-2.5" />
+                        <span>Add Sub Exam to {exam}</span>
+                      </button>
+                    </div>
                   </div>
 
                   {(groupedByExam[exam] || []).map((item) => {
-                    const itemLangs =
-                      Array.isArray(item.languages) && item.languages.length > 0
-                        ? item.languages
-                        : ['English'];
+                    const itemLangs = extractLanguagesArray(item);
+                    const itemSubExams = extractSubExamsArray(item);
                     const isEditingThis = editingTagId === item._id;
 
                     return (
@@ -967,9 +1261,35 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
                                 {item.quizCount || 0} quizzes
                               </span>
                             </div>
+
                             <p className="mt-1 text-xs font-bold text-slate-900">
-                              {formatHierarchyPath(item)}
+                              {[
+                                item.examName,
+                                item.subjectName,
+                                item.subSubjectName,
+                                item.subTopicName,
+                              ]
+                                .filter(Boolean)
+                                .join(' › ')}
                             </p>
+
+                            {/* Deduplicated Individual Sub-Exam Chips */}
+                            {itemSubExams.length > 0 && (
+                              <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">
+                                  Sub-Exams:
+                                </span>
+                                {itemSubExams.map((se) => (
+                                  <span
+                                    key={se}
+                                    className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.2 text-[10px] font-bold text-slate-700"
+                                  >
+                                    {se}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
                             {item.syllabusScope && (
                               <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
                                 {item.syllabusScope}
@@ -1027,14 +1347,14 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
                           </div>
                         </div>
 
-                        {/* Inline Tag Editor (Edit Exam, Sub Exam, Languages, Subject, Sub Subject, Sub Topic, Tag) */}
+                        {/* Inline Tag Editor */}
                         {isEditingThis && (
                           <form
                             onSubmit={handleSaveTagEdit}
                             className="mt-3 flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3"
                           >
                             <p className="text-[11px] font-bold text-slate-800">
-                              Edit Tag Hierarchy &amp; Languages
+                              Edit Tag Hierarchy, Shared Sub-Exams &amp; Languages
                             </p>
                             <div className="grid grid-cols-2 gap-2">
                               <input
@@ -1052,14 +1372,14 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
                               />
                               <input
                                 type="text"
-                                value={editTagForm.subExamName}
+                                value={editTagForm.subExams}
                                 onChange={(e) =>
                                   setEditTagForm((prev) => ({
                                     ...prev,
-                                    subExamName: e.target.value,
+                                    subExams: e.target.value,
                                   }))
                                 }
-                                placeholder="2. Sub Exam"
+                                placeholder="2. Sub Exams (e.g. CGL, CHSL, MTS)"
                                 className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 outline-none focus:border-slate-900"
                               />
                             </div>
@@ -1073,7 +1393,7 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
                                   languages: e.target.value,
                                 }))
                               }
-                              placeholder="Languages (comma-separated, e.g. English, Malayalam)"
+                              placeholder="Languages (comma-separated, e.g. English, Hindi)"
                               className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 outline-none focus:border-slate-900"
                             />
                             <div className="grid grid-cols-2 gap-2">
@@ -1203,7 +1523,7 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
                           </button>
                         </div>
 
-                        {/* Add / Remove Languages for this Exam & Sub Exam */}
+                        {/* Add / Remove Languages for this Topic */}
                         <div className="mt-2 border-t border-slate-100 pt-2">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
@@ -1262,6 +1582,88 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
             </div>
           )}
         </>
+      )}
+
+      {/* Bulk JSON Import Modal */}
+      {showJsonImportModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/45 backdrop-blur-xs sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Bulk JSON Import"
+        >
+          <form
+            onSubmit={handleBulkJsonImport}
+            className="max-h-[90dvh] w-full max-w-md overflow-y-auto rounded-t-2xl border-t border-slate-200 bg-white px-4 pt-4 pb-6 shadow-xl sm:rounded-2xl sm:border"
+          >
+            <div className="mb-3 flex items-center justify-between border-b border-slate-200 pb-2.5">
+              <div>
+                <h2 className="text-sm font-bold text-slate-900">
+                  Bulk JSON Taxonomy Import
+                </h2>
+                <p className="text-[11px] text-slate-500">
+                  Paste structured exam/subExams/allowedLanguages/subSubjects JSON
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowJsonImportModal(false)}
+                className="rounded-full border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-600">
+                JSON ArrayPayload
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setJsonImportText(
+                    JSON.stringify(SSC_TAXONOMY_JSON_PRESET, null, 2)
+                  )
+                }
+                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-100"
+              >
+                <Sparkles className="h-3 w-3" />
+                <span>Load Official SSC Preset</span>
+              </button>
+            </div>
+
+            <textarea
+              rows={12}
+              required
+              value={jsonImportText}
+              onChange={(e) => setJsonImportText(e.target.value)}
+              placeholder="Paste JSON array here..."
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-[11px] leading-relaxed text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
+            />
+
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowJsonImportModal(false)}
+                className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-xs font-semibold text-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={importingJson}
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-slate-900 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-slate-800 disabled:opacity-60"
+              >
+                {importingJson ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <FileJson className="h-3.5 w-3.5" />
+                )}
+                <span>{importingJson ? 'Importing...' : 'Import JSON'}</span>
+              </button>
+            </div>
+          </form>
+        </div>
       )}
 
       {editingQuiz && (

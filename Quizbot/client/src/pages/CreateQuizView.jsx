@@ -20,6 +20,7 @@ import {
   BULK_QUIZ_TEMPLATE,
   parseBulkQuizzesText,
 } from '../lib/bulkQuizParser.js';
+import { extractSubExamsArray } from '../lib/sscTaxonomyPreset.js';
 import { openAdminContactLink } from '../lib/telegram.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -27,9 +28,16 @@ export function formatHierarchyPath(item) {
   if (!item) return '';
   const h =
     item.hashtag && typeof item.hashtag === 'object' ? item.hashtag : item;
+  const subExams = extractSubExamsArray(item.subExams?.length ? item : h);
+  let subExamLabel = '';
+  if (subExams.length > 0 && subExams.length <= 2) {
+    subExamLabel = subExams.join(', ');
+  } else if (subExams.length > 2) {
+    subExamLabel = `${subExams.slice(0, 2).join(', ')} +${subExams.length - 2}`;
+  }
   return [
     item.examName || h.examName,
-    item.subExamName || h.subExamName,
+    subExamLabel,
     item.subjectName || h.subjectName,
     item.subSubjectName || h.subSubjectName,
     item.subTopicName || h.subTopicName,
@@ -155,15 +163,16 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
 
   const subExamChoices = useMemo(() => {
     return Array.from(
-      new Set(examTags.map((t) => (t.subExamName || '').trim()).filter(Boolean))
+      new Set(examTags.flatMap((t) => extractSubExamsArray(t)))
     );
   }, [examTags]);
 
   const filteredBySubExam = useMemo(() => {
     if (selectedSubExam === 'ALL') return examTags;
-    return examTags.filter(
-      (t) => (t.subExamName || '').trim() === selectedSubExam
-    );
+    return examTags.filter((t) => {
+      const subs = extractSubExamsArray(t);
+      return subs.length === 0 || subs.includes(selectedSubExam);
+    });
   }, [examTags, selectedSubExam]);
 
   const subjectChoices = useMemo(() => {

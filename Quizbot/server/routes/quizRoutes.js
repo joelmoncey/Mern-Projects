@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   createQuiz,
+  createBulkQuizzes,
   getQuizFeed,
   getMyQuizzes,
   getQuizById,
@@ -25,6 +26,7 @@ router.get('/escalations', protect, adminOnly, getEscalatedQuizzes);
 router.get('/admin/all', protect, adminOnly, getAllQuizzesForAdmin);
 router.get('/:id', protect, getQuizById);
 router.post('/', protect, quizWriteLimiter, createQuiz);
+router.post('/bulk', protect, quizWriteLimiter, createBulkQuizzes);
 router.patch('/:id', protect, quizWriteLimiter, updateQuiz);
 router.delete('/:id', protect, quizWriteLimiter, deleteQuiz);
 router.patch('/:id/visibility', protect, adminOnly, updateQuizVisibility);

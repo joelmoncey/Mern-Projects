@@ -58,7 +58,7 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: '100kb' }));
+app.use(express.json({ limit: '500kb' }));
 app.use('/api', apiLimiter);
 
 // Routes

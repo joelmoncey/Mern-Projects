@@ -205,6 +205,163 @@ export async function createQuiz(req, res, next) {
   }
 }
 
+export async function createBulkQuizzes(req, res, next) {
+  try {
+    if (req.user.role !== 'admin' && !req.user.canCreateQuiz) {
+      return res.status(403).json({
+        error:
+          'Only admin-approved creators can publish quizzes. Contact the admin to request creator access.',
+      });
+    }
+
+    const { hashtagId, hashtag, language, quizzes } = req.body || {};
+
+    const hashtagRef = hashtagId || hashtag;
+    if (!hashtagRef) {
+      return res
+        .status(400)
+        .json({ error: 'An active subject hashtag is required' });
+    }
+
+    if (!Array.isArray(quizzes) || quizzes.length === 0) {
+      return res
+        .status(400)
+        .json({ error: 'Provide at least 1 quiz in the bulk payload' });
+    }
+
+    if (quizzes.length > 100) {
+      return res.status(400).json({
+        error: 'Bulk upload supports up to 100 quizzes per batch',
+      });
+    }
+
+    let hashtagDoc = null;
+    if (mongoose.isValidObjectId(hashtagRef)) {
+      hashtagDoc = await Hashtag.findById(hashtagRef);
+    } else if (typeof hashtagRef === 'string') {
+      hashtagDoc = await Hashtag.findOne({
+        tag: hashtagRef.trim().replace(/^#+/, '').toUpperCase(),
+      });
+    }
+
+    if (!hashtagDoc || !hashtagDoc.isActive) {
+      return res
+        .status(400)
+        .json({ error: 'Selected hashtag is invalid or inactive' });
+    }
+
+    const allowedLanguages =
+      Array.isArray(hashtagDoc.languages) && hashtagDoc.languages.length > 0
+        ? hashtagDoc.languages
+        : ['English'];
+
+    const requestedLang = String(language || '').trim();
+    const matchedLang = requestedLang
+      ? allowedLanguages.find(
+          (l) => l.toLowerCase() === requestedLang.toLowerCase()
+        )
+      : allowedLanguages[0];
+
+    if (!matchedLang) {
+      return res.status(400).json({
+        error: `Language "${requestedLang}" is not enabled for this exam topic. Allowed: ${allowedLanguages.join(', ')}`,
+      });
+    }
+
+    const validCandidates = [];
+    const validationErrors = [];
+    const seenBatchHashes = new Set();
+    let skippedBatchDuplicates = 0;
+
+    quizzes.forEach((rawItem, idx) => {
+      const validated = validateQuizPayload(rawItem || {});
+      if (validated.error) {
+        validationErrors.push(`Quiz #${idx + 1}: ${validated.error}`);
+        return;
+      }
+      if (seenBatchHashes.has(validated.questionHash)) {
+        skippedBatchDuplicates += 1;
+        return;
+      }
+      seenBatchHashes.add(validated.questionHash);
+      validCandidates.push({
+        ...validated,
+        index: idx + 1,
+      });
+    });
+
+    if (validCandidates.length === 0) {
+      return res.status(400).json({
+        error:
+          validationErrors[0] ||
+          'No valid quizzes found in the bulk submission.',
+        validationErrors,
+      });
+    }
+
+    // Check which questionHashes already exist for this creator + exam + language
+    const existingDocs = await Quiz.find({
+      creator: req.user._id,
+      examName: hashtagDoc.examName,
+      language: matchedLang,
+      questionHash: { $in: validCandidates.map((c) => c.questionHash) },
+    })
+      .select('questionHash')
+      .lean();
+
+    const existingHashSet = new Set(
+      existingDocs.map((doc) => doc.questionHash)
+    );
+
+    const docsToInsert = [];
+    let skippedExistingDuplicates = 0;
+
+    for (const candidate of validCandidates) {
+      if (existingHashSet.has(candidate.questionHash)) {
+        skippedExistingDuplicates += 1;
+        continue;
+      }
+      docsToInsert.push({
+        creator: req.user._id,
+        hashtag: hashtagDoc._id,
+        examName: hashtagDoc.examName,
+        subExamName: hashtagDoc.subExamName || '',
+        language: matchedLang,
+        subjectName: hashtagDoc.subjectName,
+        subSubjectName: hashtagDoc.subSubjectName || '',
+        subTopicName: hashtagDoc.subTopicName || '',
+        question: candidate.question,
+        normalizedQuestion: candidate.normalizedQuestion,
+        questionHash: candidate.questionHash,
+        options: candidate.options,
+        correctIndex: candidate.correctIndex,
+        explanation: candidate.explanation,
+      });
+    }
+
+    let insertedDocs = [];
+    if (docsToInsert.length > 0) {
+      insertedDocs = await Quiz.insertMany(docsToInsert, { ordered: false });
+      await Hashtag.updateOne(
+        { _id: hashtagDoc._id },
+        { $inc: { quizCount: insertedDocs.length } }
+      );
+      invalidateHashtagsCache();
+      invalidateLeaderboardCache();
+    }
+
+    return res.status(201).json({
+      createdCount: insertedDocs.length,
+      skippedDuplicatesCount:
+        skippedBatchDuplicates + skippedExistingDuplicates,
+      skippedInvalidCount: validationErrors.length,
+      validationErrors,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 export async function getQuizFeed(req, res, next) {
   try {
     const {

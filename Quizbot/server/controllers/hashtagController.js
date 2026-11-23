@@ -195,6 +195,7 @@ export async function updateHashtag(req, res, next) {
       subjectName,
       subSubjectName,
       subTopicName,
+      tag,
     } = req.body || {};
 
     if (typeof isActive === 'boolean') {
@@ -207,7 +208,8 @@ export async function updateHashtag(req, res, next) {
       languages === undefined &&
       subjectName === undefined &&
       subSubjectName === undefined &&
-      subTopicName === undefined
+      subTopicName === undefined &&
+      tag === undefined
     ) {
       hashtag.isActive = !hashtag.isActive;
     }
@@ -233,8 +235,42 @@ export async function updateHashtag(req, res, next) {
     if (typeof subTopicName === 'string') {
       hashtag.subTopicName = subTopicName.trim();
     }
+    if (typeof tag === 'string' && tag.trim()) {
+      const normalizedTag = tag
+        .trim()
+        .replace(/^#+/, '')
+        .replace(/[^a-zA-Z0-9_]+/g, '_')
+        .toUpperCase();
+      if (normalizedTag && normalizedTag !== hashtag.tag) {
+        const duplicateTag = await Hashtag.findOne({
+          _id: { $ne: hashtag._id },
+          tag: normalizedTag,
+        });
+        if (duplicateTag) {
+          return res.status(409).json({
+            error: `Hashtag #${normalizedTag} already exists`,
+          });
+        }
+        hashtag.tag = normalizedTag;
+      }
+    }
 
     await hashtag.save();
+
+    // Keep denormalized hierarchy fields on existing quizzes under this tag in sync
+    await Quiz.updateMany(
+      { hashtag: hashtag._id },
+      {
+        $set: {
+          examName: hashtag.examName,
+          subExamName: hashtag.subExamName || '',
+          subjectName: hashtag.subjectName,
+          subSubjectName: hashtag.subSubjectName || '',
+          subTopicName: hashtag.subTopicName || '',
+        },
+      }
+    );
+
     invalidateHashtagsCache();
 
     return res.status(200).json({ hashtag });

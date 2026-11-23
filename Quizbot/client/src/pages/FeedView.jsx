@@ -115,22 +115,31 @@ export default function FeedView({
         setExams(examList);
         setGroupedByExam(grouped);
 
-        // If user has no saved exam yet and exams exist, prompt initial picker or set default
+        // If user has no saved exam yet and exams exist, default to all subjects & languages in the first exam
         if (examList.length > 0 && !examFilter?.examName) {
           const firstExam = examList[0];
-          const firstTag = grouped[firstExam]?.[0];
-          const firstSubject = firstTag?.subjectName || '';
-          const firstLang = firstTag?.languages?.[0] || 'English';
+          const examTags = grouped[firstExam] || [];
+          const allLangs = Array.from(
+            new Set(
+              examTags.flatMap((t) =>
+                Array.isArray(t.languages) && t.languages.length > 0
+                  ? t.languages
+                  : ['English']
+              )
+            )
+          );
+          const langs = allLangs.length > 0 ? allLangs : ['English'];
           onUpdateExamFilter?.({
             examName: firstExam,
             subExamName: '',
-            language: firstLang,
-            subjectName: firstSubject,
+            languages: langs,
+            language: langs.join(','),
+            subjectName: '',
             subSubjectName: '',
             subTopicName: '',
             hashtagId: '',
             tag: '',
-            label: `${[firstExam, firstSubject].filter(Boolean).join(' › ')} (${firstLang})`,
+            label: `${firstExam} › All Subjects (${langs.join(' + ')})`,
           });
           setShowPickerModal(true);
         }
@@ -146,7 +155,10 @@ export default function FeedView({
   }, [isOfflinePreview]);
 
   const activeExam = examFilter?.examName || exams[0] || '';
-  const activeLanguage = examFilter?.language || '';
+  const activeLanguage =
+    Array.isArray(examFilter?.languages) && examFilter.languages.length > 0
+      ? examFilter.languages.join(',')
+      : examFilter?.language || '';
   const activeSubject = examFilter?.subjectName || '';
 
   // Subjects available under the currently active exam for quick 1-tap switching
@@ -284,17 +296,24 @@ export default function FeedView({
   }
 
   function handleQuickSwitchSubject(subj) {
-    const lang = activeLanguage || 'English';
+    const langs =
+      Array.isArray(examFilter?.languages) && examFilter.languages.length > 0
+        ? examFilter.languages
+        : activeLanguage
+          ? activeLanguage.split(',')
+          : ['English'];
+    const isAll = !subj || subj === 'ALL';
     onUpdateExamFilter?.({
       examName: activeExam,
-      subExamName: '',
-      language: lang,
-      subjectName: subj,
+      subExamName: examFilter?.subExamName || '',
+      languages: langs,
+      language: langs.join(','),
+      subjectName: isAll ? '' : subj,
       subSubjectName: '',
       subTopicName: '',
       hashtagId: '',
       tag: '',
-      label: `${[activeExam, subj].filter(Boolean).join(' › ')} (${lang})`,
+      label: `${activeExam} › ${isAll ? 'All Subjects' : subj} (${langs.join(' + ')})`,
     });
   }
 
@@ -365,12 +384,23 @@ export default function FeedView({
           </div>
         </div>
 
-        {/* Quick Subject Switcher Pills inside the Selected Exam */}
+        {/* Quick Subject Switcher Pills inside the Selected Exam (All Subjects + Individual Subjects) */}
         {subjectsForActiveExam.length > 0 && (
           <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <span className="shrink-0 rounded-full border border-slate-300 bg-slate-100 px-2.5 py-0.5 text-[10px] font-extrabold tracking-wider text-slate-800 uppercase">
               {activeExam}
             </span>
+            <button
+              type="button"
+              onClick={() => handleQuickSwitchSubject('ALL')}
+              className={`shrink-0 rounded-full border px-3 py-0.5 text-[11px] font-bold transition active:scale-95 ${
+                !activeSubject
+                  ? 'border-emerald-600 bg-emerald-600 text-white shadow-2xs'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
+              }`}
+            >
+              All Subjects
+            </button>
             {subjectsForActiveExam.map((subj) => {
               const active = activeSubject === subj;
               return (

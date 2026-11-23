@@ -10,8 +10,12 @@ import {
 import { formatHierarchyPath } from '../pages/CreateQuizView.jsx';
 
 /**
- * Reusable Exam, Sub Exam, Language/Medium, and Subject/Topic selector used
- * on the First Page (initial selection + "Edit Exam / Subject" drawer) and inside Creator Profiles.
+ * Easy, flexible Exam + Multi-Language + Optional Sub-Exam/Subject/Topic filter modal:
+ * - Exam: Required (must pick 1 exam)
+ * - Languages: Select 1 or MORE languages (multi-select)
+ * - Sub Exam, Subject, Sub Subject, Sub Topic: All optional (default to "All" so
+ *   selecting an Exam + Language(s) immediately gives all questions in that exam,
+ *   and users can narrow down to a specific Subject / Sub Topic only if needed).
  */
 export default function ExamTopicPickerModal({
   exams = [],
@@ -30,11 +34,23 @@ export default function ExamTopicPickerModal({
   const [subExamName, setSubExamName] = useState(
     currentFilter?.subExamName || 'ALL'
   );
-  const [language, setLanguage] = useState(
-    currentFilter?.language || 'English'
-  );
+  const [selectedLanguages, setSelectedLanguages] = useState(() => {
+    if (
+      Array.isArray(currentFilter?.languages) &&
+      currentFilter.languages.length > 0
+    ) {
+      return currentFilter.languages;
+    }
+    if (currentFilter?.language) {
+      return currentFilter.language
+        .split(',')
+        .map((l) => l.trim())
+        .filter(Boolean);
+    }
+    return [];
+  });
   const [subjectName, setSubjectName] = useState(
-    currentFilter?.subjectName || ''
+    currentFilter?.subjectName || 'ALL'
   );
   const [subSubjectName, setSubSubjectName] = useState(
     currentFilter?.subSubjectName || 'ALL'
@@ -76,18 +92,24 @@ export default function ExamTopicPickerModal({
         ? t.languages
         : ['English']
     );
-    const unique = Array.from(new Set(langs.map((l) => l.trim()).filter(Boolean)));
+    const unique = Array.from(
+      new Set(langs.map((l) => l.trim()).filter(Boolean))
+    );
     return unique.length > 0 ? unique : ['English'];
   }, [filteredBySubExam]);
 
+  // Ensure at least 1 valid language from languageChoices is selected
   useEffect(() => {
-    if (
-      languageChoices.length > 0 &&
-      (!language || !languageChoices.includes(language))
-    ) {
-      setLanguage(languageChoices[0]);
+    const validSelected = selectedLanguages.filter((l) =>
+      languageChoices.includes(l)
+    );
+    if (validSelected.length === 0 && languageChoices.length > 0) {
+      // Default to all available languages for this exam so user never misses questions
+      setSelectedLanguages([...languageChoices]);
+    } else if (validSelected.length !== selectedLanguages.length) {
+      setSelectedLanguages(validSelected);
     }
-  }, [languageChoices, language]);
+  }, [languageChoices, selectedLanguages]);
 
   const subjectChoices = useMemo(
     () =>
@@ -103,12 +125,11 @@ export default function ExamTopicPickerModal({
 
   useEffect(() => {
     if (
+      subjectName !== 'ALL' &&
       subjectChoices.length > 0 &&
-      (!subjectName || !subjectChoices.includes(subjectName))
+      !subjectChoices.includes(subjectName)
     ) {
-      setSubjectName(subjectChoices[0]);
-    } else if (subjectChoices.length === 0) {
-      setSubjectName('');
+      setSubjectName('ALL');
     }
   }, [subjectChoices, subjectName]);
 
@@ -140,11 +161,7 @@ export default function ExamTopicPickerModal({
 
   const selectedTagDoc = useMemo(() => {
     if (hashtagId && hashtagId !== 'ALL') {
-      const match = filteredTopicTags.find((t) => t._id === hashtagId);
-      if (match) return match;
-    }
-    if (filteredTopicTags.length === 1) {
-      return filteredTopicTags[0];
+      return filteredTopicTags.find((t) => t._id === hashtagId) || null;
     }
     return null;
   }, [filteredTopicTags, hashtagId]);
@@ -153,47 +170,77 @@ export default function ExamTopicPickerModal({
     setExamName(nextExam);
     setSubExamName('ALL');
     const nextTags = groupedByExam[nextExam] || [];
-    const firstSubject = nextTags[0]?.subjectName || '';
-    const firstLang = nextTags[0]?.languages?.[0] || 'English';
-    setLanguage(firstLang);
-    setSubjectName(firstSubject);
+    const nextLangs = Array.from(
+      new Set(
+        nextTags.flatMap((t) =>
+          Array.isArray(t.languages) && t.languages.length > 0
+            ? t.languages
+            : ['English']
+        )
+      )
+    );
+    setSelectedLanguages(nextLangs.length > 0 ? nextLangs : ['English']);
+    setSubjectName('ALL');
     setSubSubjectName('ALL');
     setHashtagId('ALL');
+  }
+
+  function handleToggleLanguage(lang) {
+    setSelectedLanguages((prev) => {
+      const exists = prev.includes(lang);
+      if (exists) {
+        // Keep at least 1 language selected
+        if (prev.length <= 1) return prev;
+        return prev.filter((l) => l !== lang);
+      }
+      return [...prev, lang];
+    });
+  }
+
+  function handleSelectAllLanguages() {
+    setSelectedLanguages([...languageChoices]);
   }
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!examName) return;
 
-    const chosenTag =
-      selectedTagDoc ||
-      (hashtagId !== 'ALL'
-        ? filteredTopicTags.find((t) => t._id === hashtagId)
-        : null);
+    const finalLangs =
+      selectedLanguages.length > 0 ? selectedLanguages : [languageChoices[0] || 'English'];
 
-    const baseLabel = chosenTag
-      ? formatHierarchyPath(chosenTag)
+    const chosenTag = selectedTagDoc;
+
+    const pathParts = chosenTag
+      ? [formatHierarchyPath(chosenTag)]
       : [
           examName,
           subExamName !== 'ALL' ? subExamName : '',
-          subjectName !== 'ALL' ? subjectName : '',
+          subjectName !== 'ALL' ? subjectName : 'All Subjects',
           subSubjectName !== 'ALL' ? subSubjectName : '',
-        ]
-          .filter(Boolean)
-          .join(' › ');
+        ].filter(Boolean);
+
+    const langLabel =
+      finalLangs.length === languageChoices.length && languageChoices.length > 1
+        ? 'All Langs'
+        : finalLangs.join(' + ');
 
     onApply({
       examName,
       subExamName: subExamName === 'ALL' ? '' : subExamName,
-      language: language || 'English',
+      languages: finalLangs,
+      language: finalLangs.join(','),
       subjectName: subjectName === 'ALL' ? '' : subjectName,
       subSubjectName: subSubjectName === 'ALL' ? '' : subSubjectName,
       subTopicName: chosenTag?.subTopicName || '',
       hashtagId: chosenTag?._id || '',
       tag: chosenTag?.tag || '',
-      label: `${baseLabel} (${language || 'English'})`,
+      label: `${pathParts.join(' › ')} (${langLabel})`,
     });
   }
+
+  const allLangsSelected =
+    languageChoices.length > 1 &&
+    selectedLanguages.length === languageChoices.length;
 
   return (
     <div
@@ -214,11 +261,11 @@ export default function ExamTopicPickerModal({
             <div>
               <h2 className="text-sm font-bold tracking-tight text-slate-900">
                 {isInitialSetup
-                  ? 'Select Your Exam, Language & Subject'
-                  : 'Edit Exam, Language & Subject'}
+                  ? 'Choose Your Exam & Language'
+                  : 'Filter Exam, Language & Topics'}
               </h2>
               <p className="text-[11px] text-slate-500">
-                Applies to your Feed and Creator Profiles (change anytime)
+                Exam &amp; Language required &middot; Subject &amp; Topic optional
               </p>
             </div>
           </div>
@@ -236,10 +283,10 @@ export default function ExamTopicPickerModal({
         </div>
 
         <div className="flex flex-col gap-3.5">
-          {/* 1. Exam Pills */}
+          {/* 1. Exam Pills (Required) */}
           <div>
             <label className="mb-1.5 block text-[11px] font-bold tracking-wider text-slate-500 uppercase">
-              1. Choose Exam
+              1. Exam (Required)
             </label>
             <div className="flex flex-wrap gap-1.5">
               {exams.map((exam) => {
@@ -263,11 +310,50 @@ export default function ExamTopicPickerModal({
             </div>
           </div>
 
-          {/* 2. Sub Exam (if available) */}
+          {/* 2. Language / Medium (Multi-Select: 1 or more languages) */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="flex items-center gap-1 text-[11px] font-bold tracking-wider text-slate-500 uppercase">
+                <Globe className="h-3 w-3" />
+                <span>2. Language (Select 1 or more)</span>
+              </label>
+              {languageChoices.length > 1 && !allLangsSelected && (
+                <button
+                  type="button"
+                  onClick={handleSelectAllLanguages}
+                  className="text-[11px] font-bold text-slate-700 underline hover:text-slate-900"
+                >
+                  Select All
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {languageChoices.map((lang) => {
+                const active = selectedLanguages.includes(lang);
+                return (
+                  <button
+                    key={lang}
+                    type="button"
+                    onClick={() => handleToggleLanguage(lang)}
+                    className={`inline-flex items-center gap-1 rounded-full border px-3.5 py-1.5 text-xs font-bold transition active:scale-95 ${
+                      active
+                        ? 'border-emerald-600 bg-emerald-600 text-white shadow-2xs'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
+                    }`}
+                  >
+                    {active && <Check className="h-3 w-3 stroke-[3]" />}
+                    <span>{lang}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 3. Sub Exam (Optional — defaults to All Sub Exams) */}
           {subExamChoices.length > 0 && (
             <div>
               <label className="mb-1.5 block text-[11px] font-bold tracking-wider text-slate-500 uppercase">
-                2. Sub Exam
+                3. Sub Exam (Optional)
               </label>
               <div className="flex flex-wrap gap-1.5">
                 <button
@@ -276,13 +362,13 @@ export default function ExamTopicPickerModal({
                     setSubExamName('ALL');
                     setHashtagId('ALL');
                   }}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                  className={`rounded-full border px-3 py-1 text-xs font-bold transition ${
                     subExamName === 'ALL'
                       ? 'border-slate-900 bg-slate-900 text-white'
                       : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-white'
                   }`}
                 >
-                  All in {examName}
+                  All Sub Exams
                 </button>
                 {subExamChoices.map((se) => {
                   const active = subExamName === se;
@@ -308,41 +394,31 @@ export default function ExamTopicPickerModal({
             </div>
           )}
 
-          {/* 3. Language / Medium Pills (Configured by Admin for this Exam & Sub Exam) */}
-          <div>
-            <label className="mb-1.5 flex items-center gap-1 text-[11px] font-bold tracking-wider text-slate-500 uppercase">
-              <Globe className="h-3 w-3" />
-              <span>3. Choose Language / Medium</span>
-            </label>
-            <div className="flex flex-wrap gap-1.5">
-              {languageChoices.map((lang) => {
-                const active = language === lang;
-                return (
-                  <button
-                    key={lang}
-                    type="button"
-                    onClick={() => setLanguage(lang)}
-                    className={`inline-flex items-center gap-1 rounded-full border px-3.5 py-1.5 text-xs font-bold transition active:scale-95 ${
-                      active
-                        ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
-                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
-                    }`}
-                  >
-                    {active && <Check className="h-3 w-3 stroke-[3]" />}
-                    <span>{lang}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* 4. Subject Pills */}
+          {/* 4. Subject Pills (Optional — defaults to All Subjects) */}
           {subjectChoices.length > 0 && (
             <div>
               <label className="mb-1.5 block text-[11px] font-bold tracking-wider text-slate-500 uppercase">
-                4. Choose Subject
+                4. Subject (Optional)
               </label>
               <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSubjectName('ALL');
+                    setSubSubjectName('ALL');
+                    setHashtagId('ALL');
+                  }}
+                  className={`inline-flex items-center gap-1 rounded-full border px-3.5 py-1.5 text-xs font-bold transition active:scale-95 ${
+                    subjectName === 'ALL'
+                      ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
+                      : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
+                  }`}
+                >
+                  {subjectName === 'ALL' && (
+                    <Check className="h-3 w-3 stroke-[3]" />
+                  )}
+                  <span>All Subjects</span>
+                </button>
                 {subjectChoices.map((subj) => {
                   const active = subjectName === subj;
                   return (
@@ -356,7 +432,7 @@ export default function ExamTopicPickerModal({
                       }}
                       className={`inline-flex items-center gap-1 rounded-full border px-3.5 py-1.5 text-xs font-bold transition active:scale-95 ${
                         active
-                          ? 'border-emerald-600 bg-emerald-600 text-white shadow-2xs'
+                          ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
                           : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
                       }`}
                     >
@@ -369,58 +445,63 @@ export default function ExamTopicPickerModal({
             </div>
           )}
 
-          {/* 5. Sub Subject & 6. Sub Topic (when multiple sub-topics exist) */}
-          {(subSubjectChoices.length > 0 || filteredTopicTags.length > 1) && (
-            <div className="grid grid-cols-2 gap-2">
-              {subSubjectChoices.length > 0 && (
-                <div>
-                  <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-500 uppercase">
-                    5. Sub Subject
-                  </label>
-                  <select
-                    value={subSubjectName}
-                    onChange={(e) => {
-                      setSubSubjectName(e.target.value);
-                      setHashtagId('ALL');
-                    }}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
-                  >
-                    <option value="ALL">All Sub Subjects</option>
-                    {subSubjectChoices.map((ss) => (
-                      <option key={ss} value={ss}>
-                        {ss}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+          {/* 5. Sub Subject & 6. Sub Topic (Optional drill-down when a Subject is chosen) */}
+          {subjectName !== 'ALL' &&
+            (subSubjectChoices.length > 0 || filteredTopicTags.length > 1) && (
+              <div className="grid grid-cols-2 gap-2">
+                {subSubjectChoices.length > 0 && (
+                  <div>
+                    <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                      5. Sub Subject (Optional)
+                    </label>
+                    <select
+                      value={subSubjectName}
+                      onChange={(e) => {
+                        setSubSubjectName(e.target.value);
+                        setHashtagId('ALL');
+                      }}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
+                    >
+                      <option value="ALL">All Sub Subjects</option>
+                      {subSubjectChoices.map((ss) => (
+                        <option key={ss} value={ss}>
+                          {ss}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
-              {filteredTopicTags.length > 1 && (
-                <div className={subSubjectChoices.length === 0 ? 'col-span-2' : ''}>
-                  <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-500 uppercase">
-                    6. Sub Topic
-                  </label>
-                  <select
-                    value={hashtagId}
-                    onChange={(e) => setHashtagId(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
+                {filteredTopicTags.length > 1 && (
+                  <div
+                    className={
+                      subSubjectChoices.length === 0 ? 'col-span-2' : ''
+                    }
                   >
-                    <option value="ALL">All Topics in {subjectName}</option>
-                    {filteredTopicTags.map((t) => (
-                      <option key={t._id} value={t._id}>
-                        {t.subTopicName || t.subSubjectName || t.subjectName} (#{t.tag})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-          )}
+                    <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                      6. Sub Topic (Optional)
+                    </label>
+                    <select
+                      value={hashtagId}
+                      onChange={(e) => setHashtagId(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs font-medium text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
+                    >
+                      <option value="ALL">All Topics in {subjectName}</option>
+                      {filteredTopicTags.map((t) => (
+                        <option key={t._id} value={t._id}>
+                          {t.subTopicName || t.subSubjectName || t.subjectName} (#{t.tag})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
 
           {/* Current Selection Summary */}
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs">
             <div className="flex flex-wrap items-center gap-1 font-bold text-slate-900">
-              <span>Selected:</span>
+              <span>Showing:</span>
               <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
               <span>
                 {selectedTagDoc
@@ -428,12 +509,12 @@ export default function ExamTopicPickerModal({
                   : [
                       examName,
                       subExamName !== 'ALL' ? subExamName : '',
-                      subjectName !== 'ALL' ? subjectName : '',
+                      subjectName !== 'ALL' ? subjectName : 'All Subjects',
                       subSubjectName !== 'ALL' ? subSubjectName : '',
                     ]
                       .filter(Boolean)
                       .join(' › ')}{' '}
-                ({language})
+                ({selectedLanguages.join(' + ')})
               </span>
             </div>
             {selectedTagDoc?.syllabusScope && (

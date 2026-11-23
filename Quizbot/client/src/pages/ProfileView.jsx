@@ -468,16 +468,24 @@ export default function ProfileView({
   const selectedTopicQuizzes = useMemo(() => {
     if (!activeTopic) return [];
     const byTopic = quizzes.filter((q) => getTopicKey(q) === activeTopic.key);
-    if (examFilter?.language) {
-      const byLang = byTopic.filter(
-        (q) =>
-          (q.language || 'English').toLowerCase() ===
-          examFilter.language.toLowerCase()
+    const activeLangs =
+      Array.isArray(examFilter?.languages) && examFilter.languages.length > 0
+        ? examFilter.languages.map((l) => l.toLowerCase())
+        : examFilter?.language
+          ? examFilter.language
+              .split(',')
+              .map((l) => l.trim().toLowerCase())
+              .filter(Boolean)
+          : [];
+
+    if (activeLangs.length > 0) {
+      const byLang = byTopic.filter((q) =>
+        activeLangs.includes((q.language || 'English').toLowerCase())
       );
       if (byLang.length > 0) return byLang;
     }
     return byTopic;
-  }, [quizzes, activeTopic, examFilter?.language]);
+  }, [quizzes, activeTopic, examFilter?.languages, examFilter?.language]);
 
   function handleSelectTopic(topic) {
     setSelectedTopicKey(topic.key);

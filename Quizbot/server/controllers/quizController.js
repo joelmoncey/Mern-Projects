@@ -272,16 +272,29 @@ export async function getQuizFeed(req, res, next) {
       language.trim() !== '' &&
       language.trim().toUpperCase() !== 'ALL'
     ) {
-      const cleanLang = language.trim();
-      const escapedLang = cleanLang.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      if (cleanLang.toLowerCase() === 'english') {
-        query.$or = [
-          { language: new RegExp(`^${escapedLang}$`, 'i') },
-          { language: { $exists: false } },
-          { language: '' },
-        ];
-      } else {
-        query.language = new RegExp(`^${escapedLang}$`, 'i');
+      const langList = language
+        .split(',')
+        .map((l) => l.trim())
+        .filter((l) => l && l.toUpperCase() !== 'ALL');
+
+      if (langList.length > 0) {
+        const regexList = langList.map((l) => {
+          const escaped = l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          return new RegExp(`^${escaped}$`, 'i');
+        });
+        const includesEnglish = langList.some(
+          (l) => l.toLowerCase() === 'english'
+        );
+
+        if (includesEnglish) {
+          query.$or = [
+            { language: { $in: regexList } },
+            { language: { $exists: false } },
+            { language: '' },
+          ];
+        } else {
+          query.language = { $in: regexList };
+        }
       }
     }
 

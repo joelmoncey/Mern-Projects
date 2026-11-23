@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -11,6 +11,7 @@ import {
   Loader2,
   Plus,
   Power,
+  Save,
   Search,
   Shield,
   Trash2,
@@ -41,9 +42,25 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
   const [syllabusScope, setSyllabusScope] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Inline Edit Tag state (admin can edit any existing tag's hierarchy & languages)
+  const [editingTagId, setEditingTagId] = useState(null);
+  const [editTagForm, setEditTagForm] = useState({
+    examName: '',
+    subExamName: '',
+    languages: '',
+    subjectName: '',
+    subSubjectName: '',
+    subTopicName: '',
+    tag: '',
+    syllabusScope: '',
+  });
+  const [savingTagEdit, setSavingTagEdit] = useState(false);
+
   // Per-topic new language input & delete confirmation state
   const [newLangByTag, setNewLangByTag] = useState({});
   const [confirmDeleteTagId, setConfirmDeleteTagId] = useState(null);
+
+  const createFormRef = useRef(null);
 
   // Escalations state
   const [escalations, setEscalations] = useState([]);
@@ -220,8 +237,6 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
           syllabusScope: syllabusScope.trim(),
         },
       });
-      setSubjectName('');
-      setSubSubjectName('');
       setSubTopicName('');
       setTag('');
       setSyllabusScope('');
@@ -232,6 +247,100 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleStartEditTag(item) {
+    setError('');
+    setSuccess('');
+    setEditingTagId(item._id);
+    setEditTagForm({
+      examName: item.examName || '',
+      subExamName: item.subExamName || '',
+      languages: Array.isArray(item.languages)
+        ? item.languages.join(', ')
+        : 'English',
+      subjectName: item.subjectName || '',
+      subSubjectName: item.subSubjectName || '',
+      subTopicName: item.subTopicName || '',
+      tag: item.tag || '',
+      syllabusScope: item.syllabusScope || '',
+    });
+  }
+
+  async function handleSaveTagEdit(e) {
+    e.preventDefault();
+    if (!editingTagId || savingTagEdit) return;
+    setError('');
+    setSuccess('');
+
+    if (isOfflinePreview) {
+      setError('Connect MongoDB & API server to edit exam topics.');
+      return;
+    }
+
+    setSavingTagEdit(true);
+    try {
+      const data = await apiRequest(`/api/hashtags/${editingTagId}`, {
+        method: 'PATCH',
+        body: {
+          examName: editTagForm.examName.trim(),
+          subExamName: editTagForm.subExamName.trim(),
+          languages: editTagForm.languages,
+          subjectName: editTagForm.subjectName.trim(),
+          subSubjectName: editTagForm.subSubjectName.trim(),
+          subTopicName: editTagForm.subTopicName.trim(),
+          tag: editTagForm.tag.trim(),
+          syllabusScope: editTagForm.syllabusScope.trim(),
+        },
+      });
+      setEditingTagId(null);
+      setSuccess(`Updated #${data.hashtag.tag}`);
+      await loadHashtags();
+    } catch (err) {
+      setError(err.message || 'Failed to update topic hashtag');
+    } finally {
+      setSavingTagEdit(false);
+    }
+  }
+
+  /**
+   * Pre-fills the top create form from an existing tag card so the admin can
+   * add another Sub Exam, Subject, Sub Subject, or Sub Topic with 1 tap.
+   */
+  function handleBranchFromTag(item, level) {
+    const langs =
+      Array.isArray(item.languages) && item.languages.length > 0
+        ? item.languages.join(', ')
+        : 'English';
+
+    setExamName(item.examName || '');
+    setLanguagesInput(langs);
+    setTag('');
+    setSyllabusScope('');
+
+    if (level === 'subExam') {
+      setSubExamName('');
+      setSubjectName('');
+      setSubSubjectName('');
+      setSubTopicName('');
+    } else if (level === 'subject') {
+      setSubExamName(item.subExamName || '');
+      setSubjectName('');
+      setSubSubjectName('');
+      setSubTopicName('');
+    } else if (level === 'subSubject') {
+      setSubExamName(item.subExamName || '');
+      setSubjectName(item.subjectName || '');
+      setSubSubjectName('');
+      setSubTopicName('');
+    } else if (level === 'subTopic') {
+      setSubExamName(item.subExamName || '');
+      setSubjectName(item.subjectName || '');
+      setSubSubjectName(item.subSubjectName || '');
+      setSubTopicName('');
+    }
+
+    createFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   async function handleToggleActive(item) {
@@ -413,7 +522,7 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
         </div>
       </div>
 
-      {/* 3-Tab Switcher: Creators | Topics | Flags */}
+      {/* 3-Tab Switcher: Creators | Topics & Langs | Flags */}
       <div className="mb-4 grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1">
         <button
           type="button"
@@ -679,12 +788,33 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
         <>
           {/* 5-Level Exam Taxonomy + Languages Form */}
           <form
+            ref={createFormRef}
             onSubmit={handleCreateHashtag}
             className="mb-6 flex flex-col gap-2.5 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xs"
           >
-            <h2 className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
-              Add Exam Topic &amp; Allowed Languages
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
+                Add Exam Topic &amp; Allowed Languages
+              </h2>
+              {(examName || subExamName || subjectName) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExamName('');
+                    setSubExamName('');
+                    setLanguagesInput('English');
+                    setSubjectName('');
+                    setSubSubjectName('');
+                    setSubTopicName('');
+                    setTag('');
+                    setSyllabusScope('');
+                  }}
+                  className="text-[11px] font-semibold text-slate-500 hover:text-slate-900"
+                >
+                  Clear form
+                </button>
+              )}
+            </div>
 
             <div className="grid grid-cols-2 gap-2">
               <input
@@ -781,7 +911,7 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
             </button>
           </form>
 
-          {/* Grouped Topics List with Language Add/Remove & Tag Delete */}
+          {/* Grouped Topics List with Edit, Branch (+Sub Exam/+Subject/+Sub Subject/+Sub Topic), Language Add/Remove & Tag Delete */}
           {loadingTags ? (
             <div className="flex justify-center py-10">
               <Loader2 className="h-5 w-5 animate-spin text-slate-700" />
@@ -794,15 +924,29 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
             <div className="flex flex-col gap-5">
               {exams.map((exam) => (
                 <div key={exam} className="flex flex-col gap-2">
-                  <h3 className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
-                    {exam}
-                  </h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
+                      {exam}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const first = groupedByExam[exam]?.[0];
+                        if (first) handleBranchFromTag(first, 'subExam');
+                      }}
+                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                      <Plus className="h-2.5 w-2.5" />
+                      <span>Add Sub Exam to {exam}</span>
+                    </button>
+                  </div>
 
                   {(groupedByExam[exam] || []).map((item) => {
                     const itemLangs =
                       Array.isArray(item.languages) && item.languages.length > 0
                         ? item.languages
                         : ['English'];
+                    const isEditingThis = editingTagId === item._id;
 
                     return (
                       <div
@@ -833,8 +977,21 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
                             )}
                           </div>
 
-                          {/* Active Toggle + Delete Tag Button */}
-                          <div className="flex shrink-0 items-center gap-1.5">
+                          {/* Edit Tag + Active Toggle + Delete Tag Buttons */}
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                isEditingThis
+                                  ? setEditingTagId(null)
+                                  : handleStartEditTag(item)
+                              }
+                              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50 active:scale-95"
+                            >
+                              <Edit3 className="h-3 w-3" />
+                              <span>{isEditingThis ? 'Close' : 'Edit'}</span>
+                            </button>
+
                             <button
                               type="button"
                               onClick={() => handleToggleActive(item)}
@@ -870,8 +1027,184 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
                           </div>
                         </div>
 
+                        {/* Inline Tag Editor (Edit Exam, Sub Exam, Languages, Subject, Sub Subject, Sub Topic, Tag) */}
+                        {isEditingThis && (
+                          <form
+                            onSubmit={handleSaveTagEdit}
+                            className="mt-3 flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3"
+                          >
+                            <p className="text-[11px] font-bold text-slate-800">
+                              Edit Tag Hierarchy &amp; Languages
+                            </p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                type="text"
+                                required
+                                value={editTagForm.examName}
+                                onChange={(e) =>
+                                  setEditTagForm((prev) => ({
+                                    ...prev,
+                                    examName: e.target.value,
+                                  }))
+                                }
+                                placeholder="1. Exam *"
+                                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 outline-none focus:border-slate-900"
+                              />
+                              <input
+                                type="text"
+                                value={editTagForm.subExamName}
+                                onChange={(e) =>
+                                  setEditTagForm((prev) => ({
+                                    ...prev,
+                                    subExamName: e.target.value,
+                                  }))
+                                }
+                                placeholder="2. Sub Exam"
+                                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 outline-none focus:border-slate-900"
+                              />
+                            </div>
+                            <input
+                              type="text"
+                              required
+                              value={editTagForm.languages}
+                              onChange={(e) =>
+                                setEditTagForm((prev) => ({
+                                  ...prev,
+                                  languages: e.target.value,
+                                }))
+                              }
+                              placeholder="Languages (comma-separated, e.g. English, Malayalam)"
+                              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 outline-none focus:border-slate-900"
+                            />
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                type="text"
+                                required
+                                value={editTagForm.subjectName}
+                                onChange={(e) =>
+                                  setEditTagForm((prev) => ({
+                                    ...prev,
+                                    subjectName: e.target.value,
+                                  }))
+                                }
+                                placeholder="3. Subject *"
+                                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 outline-none focus:border-slate-900"
+                              />
+                              <input
+                                type="text"
+                                value={editTagForm.subSubjectName}
+                                onChange={(e) =>
+                                  setEditTagForm((prev) => ({
+                                    ...prev,
+                                    subSubjectName: e.target.value,
+                                  }))
+                                }
+                                placeholder="4. Sub Subject"
+                                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 outline-none focus:border-slate-900"
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <input
+                                type="text"
+                                value={editTagForm.subTopicName}
+                                onChange={(e) =>
+                                  setEditTagForm((prev) => ({
+                                    ...prev,
+                                    subTopicName: e.target.value,
+                                  }))
+                                }
+                                placeholder="5. Sub Topic"
+                                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 outline-none focus:border-slate-900"
+                              />
+                              <input
+                                type="text"
+                                required
+                                value={editTagForm.tag}
+                                onChange={(e) =>
+                                  setEditTagForm((prev) => ({
+                                    ...prev,
+                                    tag: e.target.value.toUpperCase(),
+                                  }))
+                                }
+                                placeholder="Tag code"
+                                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 outline-none focus:border-slate-900"
+                              />
+                            </div>
+                            <input
+                              type="text"
+                              value={editTagForm.syllabusScope}
+                              onChange={(e) =>
+                                setEditTagForm((prev) => ({
+                                  ...prev,
+                                  syllabusScope: e.target.value,
+                                }))
+                              }
+                              placeholder="Syllabus scope / notes"
+                              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 outline-none focus:border-slate-900"
+                            />
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setEditingTagId(null)}
+                                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="submit"
+                                disabled={savingTagEdit}
+                                className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800 disabled:opacity-60"
+                              >
+                                <Save className="h-3 w-3" />
+                                <span>
+                                  {savingTagEdit ? 'Saving...' : 'Save Tag'}
+                                </span>
+                              </button>
+                            </div>
+                          </form>
+                        )}
+
+                        {/* Quick Branch / Add More Under This Tag */}
+                        <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2">
+                          <span className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+                            Add More:
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleBranchFromTag(item, 'subExam')}
+                            className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-slate-100"
+                          >
+                            + Sub Exam
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleBranchFromTag(item, 'subject')}
+                            className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-slate-100"
+                          >
+                            + Subject
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleBranchFromTag(item, 'subSubject')
+                            }
+                            className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-slate-100"
+                          >
+                            + Sub Subject
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleBranchFromTag(item, 'subTopic')
+                            }
+                            className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-slate-100"
+                          >
+                            + Sub Topic
+                          </button>
+                        </div>
+
                         {/* Add / Remove Languages for this Exam & Sub Exam */}
-                        <div className="mt-3 border-t border-slate-100 pt-2.5">
+                        <div className="mt-2 border-t border-slate-100 pt-2">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wider text-slate-500 uppercase">
                               <Globe className="h-3 w-3" />

@@ -31,6 +31,11 @@ const userSchema = new Schema(
       enum: ['user', 'admin'],
       default: 'user',
     },
+    canCreateQuiz: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     followers: [
       {
         type: Schema.Types.ObjectId,

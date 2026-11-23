@@ -20,6 +20,25 @@ services:
         generateValue: true
       - key: ADMIN_TELEGRAM_IDS
         sync: false
-      # Vercel client URL(s), comma-separated, no trailing slash
       - key: CLIENT_URL
         sync: false
+
+  - type: web
+    name: quiz-gram-client
+    runtime: static
+    rootDir: client
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false
+      - key: VITE_BOT_USERNAME
+        sync: false
+      - key: VITE_APP_SHORT_NAME
+        sync: false
+      - key: VITE_ADMIN_CONTACT_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

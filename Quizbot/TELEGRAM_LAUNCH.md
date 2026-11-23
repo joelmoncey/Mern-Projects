@@ -85,6 +85,7 @@ Telegram Mini Apps **require HTTPS**. You can deploy `client/` to **Vercel** (us
    | `VITE_API_URL` | Your live backend HTTPS URL (no trailing slash, e.g. `https://quiz-gram-api.onrender.com`) |
    | `VITE_BOT_USERNAME` | Your Telegram bot's username without `@` (e.g. `QuizGramBot`) |
    | `VITE_APP_SHORT_NAME` | Your Mini App short name from `@BotFather` (e.g. `quizgram`) |
+   | `VITE_ADMIN_CONTACT_URL` | Your Admin Contact Telegram bot or support link (e.g. `https://t.me/YourAdminContactBot`) |
 5. Click **Deploy** and copy your live HTTPS URL (e.g. `https://quiz-gram.vercel.app`).
 6. Go back to your Backend service (Render/Railway), set `CLIENT_URL=https://quiz-gram.vercel.app`, and redeploy/restart the backend so CORS permits your frontend origin.
 

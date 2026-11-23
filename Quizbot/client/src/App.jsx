@@ -99,7 +99,10 @@ function AppShell() {
             />
           )}
           {currentTab === 'create' && (
-            <CreateQuizView onCreated={() => handleChangeTab('feed')} />
+            <CreateQuizView
+              onCreated={() => handleChangeTab('feed')}
+              onBackToFeed={() => handleChangeTab('feed')}
+            />
           )}
           {currentTab === 'alerts' && (
             <NotificationsView

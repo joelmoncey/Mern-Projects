@@ -13,6 +13,7 @@ function getAdminTelegramIdSet() {
 }
 
 function serializeUser(user) {
+  const isAdmin = user.role === 'admin';
   return {
     _id: user._id,
     telegramId: user.telegramId,
@@ -20,6 +21,7 @@ function serializeUser(user) {
     firstName: user.firstName,
     photoUrl: user.photoUrl,
     role: user.role,
+    canCreateQuiz: isAdmin || Boolean(user.canCreateQuiz),
     followersCount: Array.isArray(user.followers) ? user.followers.length : 0,
     followingCount: Array.isArray(user.following) ? user.following.length : 0,
     following: (user.following || []).map((id) => String(id)),
@@ -62,19 +64,24 @@ export async function telegramLogin(req, res, next) {
     }
 
     const adminIds = getAdminTelegramIdSet();
-    const role = adminIds.has(profile.telegramId) ? 'admin' : 'user';
+    const isAdmin = adminIds.has(profile.telegramId);
+    const role = isAdmin ? 'admin' : 'user';
+
+    const updateFields = {
+      firstName: profile.firstName,
+      username: profile.username,
+      photoUrl: profile.photoUrl,
+      role,
+      ...(isAdmin ? { canCreateQuiz: true } : {}),
+    };
 
     const user = await User.findOneAndUpdate(
       { telegramId: profile.telegramId },
       {
-        $set: {
-          firstName: profile.firstName,
-          username: profile.username,
-          photoUrl: profile.photoUrl,
-          role,
-        },
+        $set: updateFields,
         $setOnInsert: {
           telegramId: profile.telegramId,
+          ...(isAdmin ? {} : { canCreateQuiz: false }),
         },
       },
       {

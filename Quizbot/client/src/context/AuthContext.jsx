@@ -18,6 +18,7 @@ const OFFLINE_MOCK_USER = {
   username: DEV_FALLBACK_USER.username,
   photoUrl: '',
   role: 'admin',
+  canCreateQuiz: true,
   followersCount: 12,
   followingCount: 4,
   following: [],

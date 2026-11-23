@@ -70,6 +70,8 @@ function buildProfileResponse({ targetUser, viewerUser, quizzes }) {
       firstName: targetUser.firstName,
       photoUrl: targetUser.photoUrl || '',
       role: targetUser.role,
+      canCreateQuiz:
+        targetUser.role === 'admin' || Boolean(targetUser.canCreateQuiz),
       totalSolved,
       correctSolved,
       accuracy,
@@ -137,6 +139,124 @@ export async function getUserProfile(req, res, next) {
         quizzes,
       })
     );
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function listUsersForAdmin(req, res, next) {
+  try {
+    const q = String(req.query.q || '').trim();
+    const filter = {};
+
+    if (q) {
+      const cleanQ = q.replace(/^@/, '');
+      const escaped = cleanQ.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+      filter.$or = [
+        { username: regex },
+        { firstName: regex },
+        { telegramId: regex },
+      ];
+    }
+
+    const users = await User.find(filter)
+      .sort({ role: 1, canCreateQuiz: -1, createdAt: -1 })
+      .limit(60)
+      .select(
+        'telegramId username firstName photoUrl role canCreateQuiz totalSolved correctSolved streakCount createdAt'
+      )
+      .lean();
+
+    return res.status(200).json({
+      users: users.map((u) => ({
+        ...u,
+        canCreateQuiz: u.role === 'admin' || Boolean(u.canCreateQuiz),
+      })),
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function updateCreatorAccess(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ error: 'Invalid user id' });
+    }
+
+    const targetUser = await User.findById(id);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (targetUser.role === 'admin') {
+      return res.status(400).json({
+        error: 'Admin users always have quiz creation permission',
+      });
+    }
+
+    targetUser.canCreateQuiz =
+      typeof req.body?.canCreateQuiz === 'boolean'
+        ? req.body.canCreateQuiz
+        : !targetUser.canCreateQuiz;
+
+    await targetUser.save();
+
+    return res.status(200).json({
+      user: {
+        _id: targetUser._id,
+        telegramId: targetUser.telegramId,
+        username: targetUser.username,
+        firstName: targetUser.firstName,
+        role: targetUser.role,
+        canCreateQuiz: targetUser.canCreateQuiz,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function approveCreatorByIdentifier(req, res, next) {
+  try {
+    const rawIdentifier = String(req.body?.identifier || '').trim();
+    if (!rawIdentifier) {
+      return res
+        .status(400)
+        .json({ error: 'Provide a Telegram @username or numeric Telegram ID' });
+    }
+
+    const cleaned = rawIdentifier.replace(/^@/, '');
+    const escaped = cleaned.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const targetUser = await User.findOne({
+      $or: [
+        { telegramId: cleaned },
+        { username: new RegExp(`^${escaped}$`, 'i') },
+      ],
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({
+        error: `No registered user found with "${rawIdentifier}". Ask them to open Quiz-Gram once first.`,
+      });
+    }
+
+    targetUser.canCreateQuiz = true;
+    await targetUser.save();
+
+    return res.status(200).json({
+      user: {
+        _id: targetUser._id,
+        telegramId: targetUser.telegramId,
+        username: targetUser.username,
+        firstName: targetUser.firstName,
+        role: targetUser.role,
+        canCreateQuiz: true,
+      },
+    });
   } catch (error) {
     return next(error);
   }

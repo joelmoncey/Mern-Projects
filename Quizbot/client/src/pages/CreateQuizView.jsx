@@ -4,13 +4,19 @@ import {
   BookOpen,
   CheckCircle2,
   Loader2,
+  Lock,
+  MessageCircle,
   Send,
 } from 'lucide-react';
 import { apiRequest } from '../lib/api.js';
+import { openAdminContactLink } from '../lib/telegram.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
-export default function CreateQuizView({ onCreated }) {
-  const { isOfflinePreview } = useAuth();
+export default function CreateQuizView({ onCreated, onBackToFeed }) {
+  const { user, isOfflinePreview } = useAuth();
+  const canCreate =
+    user?.role === 'admin' || Boolean(user?.canCreateQuiz);
+
   const [groupedByExam, setGroupedByExam] = useState({});
   const [exams, setExams] = useState([]);
   const [loadingTags, setLoadingTags] = useState(true);
@@ -27,6 +33,11 @@ export default function CreateQuizView({ onCreated }) {
   const [successMessage, setSuccessMessage] = useState('');
 
   useEffect(() => {
+    if (!canCreate) {
+      setLoadingTags(false);
+      return;
+    }
+
     let cancelled = false;
 
     if (isOfflinePreview) {
@@ -86,7 +97,7 @@ export default function CreateQuizView({ onCreated }) {
     return () => {
       cancelled = true;
     };
-  }, [isOfflinePreview]);
+  }, [canCreate, isOfflinePreview]);
 
   const subjectTags = useMemo(
     () => groupedByExam[selectedExam] || [],
@@ -97,6 +108,61 @@ export default function CreateQuizView({ onCreated }) {
     () => subjectTags.find((t) => t._id === selectedHashtagId) || null,
     [subjectTags, selectedHashtagId]
   );
+
+  if (!canCreate) {
+    return (
+      <div className="flex h-dvh flex-col justify-center bg-[#F8FAFC] px-5 pb-20">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-900">
+            <Lock className="h-5 w-5" />
+          </div>
+          <h1 className="text-base font-bold tracking-tight text-slate-900">
+            Creator Approval Required
+          </h1>
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+            To keep exam questions accurate and high-quality, only{' '}
+            <span className="font-semibold text-slate-800">
+              admin-approved creators
+            </span>{' '}
+            can publish quizzes. You can continue scrolling the feed, solving
+            quizzes, liking, following creators, and competing on the weekly
+            leaderboard.
+          </p>
+
+          {user?.telegramId && (
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+              Your Telegram ID:{' '}
+              <span className="font-mono font-bold text-slate-900">
+                {user.telegramId}
+              </span>
+              {user.username ? ` (@${user.username})` : ''}
+            </div>
+          )}
+
+          <div className="mt-5 flex flex-col gap-2.5">
+            <button
+              type="button"
+              onClick={openAdminContactLink}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800 active:scale-[0.99]"
+            >
+              <MessageCircle className="h-4 w-4" />
+              <span>Contact Admin for Creator Access</span>
+            </button>
+
+            {onBackToFeed && (
+              <button
+                type="button"
+                onClick={onBackToFeed}
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Back to Quiz Feed
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   function handleExamChange(nextExam) {
     setSelectedExam(nextExam);
@@ -159,13 +225,24 @@ export default function CreateQuizView({ onCreated }) {
 
   return (
     <div className="h-dvh overflow-y-auto bg-[#F8FAFC] px-4 pt-5 pb-24">
-      <div className="mb-5 border-b border-slate-200 pb-3">
-        <h1 className="text-lg font-bold tracking-tight text-slate-900">
-          Create Quiz
-        </h1>
-        <p className="mt-0.5 text-xs text-slate-500">
-          Select an official exam hashtag and craft a syllabus-aligned MCQ.
-        </p>
+      <div className="mb-5 flex items-center justify-between border-b border-slate-200 pb-3">
+        <div>
+          <h1 className="text-lg font-bold tracking-tight text-slate-900">
+            Create Quiz
+          </h1>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Select an official exam hashtag and craft a syllabus-aligned MCQ.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={openAdminContactLink}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-700 shadow-2xs hover:bg-slate-50 active:scale-95"
+        >
+          <MessageCircle className="h-3.5 w-3.5 text-slate-900" />
+          <span>Contact Admin</span>
+        </button>
       </div>
 
       {loadingTags ? (

@@ -8,6 +8,7 @@ import {
   Flame,
   Heart,
   Loader2,
+  MessageCircle,
   Shield,
   Target,
   Trash2,
@@ -17,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { apiRequest } from '../lib/api.js';
+import { openAdminContactLink } from '../lib/telegram.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import EditQuizModal from '../components/EditQuizModal.jsx';
 
@@ -414,16 +416,27 @@ export default function ProfileView({
           </div>
         </div>
 
-        {user?.role === 'admin' && onOpenAdmin && (
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={onOpenAdmin}
-            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 shadow-2xs hover:bg-slate-50 active:scale-95"
+            onClick={openAdminContactLink}
+            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-2xs hover:bg-slate-50 active:scale-95"
           >
-            <Shield className="h-3.5 w-3.5 text-slate-900" />
-            <span>Admin Console</span>
+            <MessageCircle className="h-3.5 w-3.5 text-slate-900" />
+            <span>Contact Admin</span>
           </button>
-        )}
+
+          {user?.role === 'admin' && onOpenAdmin && (
+            <button
+              type="button"
+              onClick={onOpenAdmin}
+              className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-slate-800 active:scale-95"
+            >
+              <Shield className="h-3.5 w-3.5" />
+              <span>Admin</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -454,11 +467,15 @@ export default function ProfileView({
                     <h2 className="truncate text-base font-bold text-slate-900">
                       {profile.firstName}
                     </h2>
-                    {profile.role === 'admin' && (
+                    {profile.role === 'admin' ? (
                       <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-bold tracking-wider text-white uppercase">
                         Admin
                       </span>
-                    )}
+                    ) : profile.canCreateQuiz ? (
+                      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold tracking-wider text-emerald-700 uppercase">
+                        Creator
+                      </span>
+                    ) : null}
                   </div>
                   <p className="truncate text-xs font-medium text-slate-500">
                     @{profile.username || 'aspirant'}

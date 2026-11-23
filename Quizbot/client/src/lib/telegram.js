@@ -134,6 +134,45 @@ export function buildQuizShareUrl(quizId) {
 }
 
 /**
+ * Returns the configured Admin Contact Telegram Bot / Support link.
+ * Set VITE_ADMIN_CONTACT_URL in client/.env (e.g. https://t.me/your_admin_bot).
+ */
+export function getAdminContactUrl() {
+  const configured = (import.meta.env.VITE_ADMIN_CONTACT_URL || '').trim();
+  if (configured) {
+    if (configured.startsWith('http://') || configured.startsWith('https://')) {
+      return configured;
+    }
+    return `https://t.me/${configured.replace(/^@/, '')}`;
+  }
+
+  const botUsername = (import.meta.env.VITE_BOT_USERNAME || '')
+    .trim()
+    .replace(/^@/, '');
+  if (botUsername) {
+    return `https://t.me/${botUsername}`;
+  }
+
+  return 'https://t.me/your_admin_contact_bot';
+}
+
+/**
+ * Opens the Admin Contact Bot / Support link inside Telegram or in a new browser tab.
+ */
+export function openAdminContactLink() {
+  const url = getAdminContactUrl();
+  try {
+    if (openTelegramLink.isAvailable() && url.startsWith('https://t.me/')) {
+      openTelegramLink(url);
+      return;
+    }
+  } catch {
+    // Fallback to window.open
+  }
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+/**
  * Shares a quiz via Telegram share link when inside Telegram, or
  * falls back to Web Share API / clipboard copy in a regular browser.
  */

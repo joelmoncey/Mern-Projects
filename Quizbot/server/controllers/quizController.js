@@ -85,6 +85,13 @@ function validateQuizPayload({ question, options, correctIndex, explanation }) {
 
 export async function createQuiz(req, res, next) {
   try {
+    if (req.user.role !== 'admin' && !req.user.canCreateQuiz) {
+      return res.status(403).json({
+        error:
+          'Only admin-approved creators can publish quizzes. Contact the admin to request creator access.',
+      });
+    }
+
     const {
       hashtagId,
       hashtag,

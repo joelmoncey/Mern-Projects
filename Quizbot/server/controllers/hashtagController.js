@@ -1,13 +1,33 @@
 import mongoose from 'mongoose';
 import Hashtag from '../models/Hashtag.js';
+import Quiz from '../models/Quiz.js';
+import Notification from '../models/Notification.js';
 import {
   CACHE_KEYS,
   getCache,
   setCache,
   invalidateHashtagsCache,
+  invalidateLeaderboardCache,
 } from '../utils/cache.js';
 
 const HASHTAGS_TTL_SECONDS = 300; // 5 minutes
+
+function normalizeLanguagesList(raw) {
+  let list = [];
+  if (Array.isArray(raw)) {
+    list = raw.flatMap((entry) => String(entry || '').split(','));
+  } else if (typeof raw === 'string') {
+    list = raw.split(',');
+  }
+  const cleaned = Array.from(
+    new Set(
+      list
+        .map((l) => l.trim())
+        .filter(Boolean)
+    )
+  );
+  return cleaned.length > 0 ? cleaned : ['English'];
+}
 
 function buildDefaultTag({
   examName,
@@ -44,7 +64,7 @@ export async function getHashtags(req, res, next) {
 
     const filter = includeInactive ? {} : { isActive: true };
 
-    const hashtags = await Hashtag.find(filter)
+    const rawHashtags = await Hashtag.find(filter)
       .sort({
         examName: 1,
         subExamName: 1,
@@ -53,6 +73,14 @@ export async function getHashtags(req, res, next) {
         subTopicName: 1,
       })
       .lean();
+
+    const hashtags = rawHashtags.map((item) => ({
+      ...item,
+      languages:
+        Array.isArray(item.languages) && item.languages.length > 0
+          ? item.languages
+          : ['English'],
+    }));
 
     const groupedByExam = {};
     for (const item of hashtags) {
@@ -83,6 +111,7 @@ export async function createHashtag(req, res, next) {
     const {
       examName,
       subExamName = '',
+      languages,
       subjectName,
       subSubjectName = '',
       subTopicName = '',
@@ -120,9 +149,12 @@ export async function createHashtag(req, res, next) {
       });
     }
 
+    const normalizedLanguages = normalizeLanguagesList(languages);
+
     const hashtag = await Hashtag.create({
       examName: examName.trim(),
       subExamName: String(subExamName || '').trim(),
+      languages: normalizedLanguages,
       subjectName: subjectName.trim(),
       subSubjectName: String(subSubjectName || '').trim(),
       subTopicName: String(subTopicName || '').trim(),
@@ -159,6 +191,7 @@ export async function updateHashtag(req, res, next) {
       syllabusScope,
       examName,
       subExamName,
+      languages,
       subjectName,
       subSubjectName,
       subTopicName,
@@ -171,6 +204,7 @@ export async function updateHashtag(req, res, next) {
       syllabusScope === undefined &&
       examName === undefined &&
       subExamName === undefined &&
+      languages === undefined &&
       subjectName === undefined &&
       subSubjectName === undefined &&
       subTopicName === undefined
@@ -187,6 +221,9 @@ export async function updateHashtag(req, res, next) {
     if (typeof subExamName === 'string') {
       hashtag.subExamName = subExamName.trim();
     }
+    if (languages !== undefined) {
+      hashtag.languages = normalizeLanguagesList(languages);
+    }
     if (typeof subjectName === 'string' && subjectName.trim()) {
       hashtag.subjectName = subjectName.trim();
     }
@@ -201,6 +238,124 @@ export async function updateHashtag(req, res, next) {
     invalidateHashtagsCache();
 
     return res.status(200).json({ hashtag });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * Adds or removes a language across all topics matching an Exam (and optional Sub Exam).
+ * Allows admins to manage allowed languages per Exam / Sub Exam cleanly.
+ */
+export async function updateExamLanguages(req, res, next) {
+  try {
+    const {
+      examName,
+      subExamName = '',
+      action,
+      language,
+    } = req.body || {};
+
+    if (!examName?.trim() || !language?.trim()) {
+      return res
+        .status(400)
+        .json({ error: 'examName and language are required' });
+    }
+
+    const cleanExam = examName.trim();
+    const cleanSubExam = String(subExamName || '').trim();
+    const cleanLang = language.trim();
+
+    const filter = { examName: cleanExam };
+    if (cleanSubExam && cleanSubExam !== 'ALL') {
+      filter.subExamName = cleanSubExam;
+    }
+
+    const matchingTags = await Hashtag.find(filter);
+    if (matchingTags.length === 0) {
+      return res
+        .status(404)
+        .json({ error: 'No topics found for the specified exam / sub-exam' });
+    }
+
+    for (const doc of matchingTags) {
+      const current =
+        Array.isArray(doc.languages) && doc.languages.length > 0
+          ? [...doc.languages]
+          : ['English'];
+
+      if (action === 'remove') {
+        const nextList = current.filter(
+          (l) => l.toLowerCase() !== cleanLang.toLowerCase()
+        );
+        if (nextList.length === 0) {
+          return res.status(400).json({
+            error:
+              'Cannot remove the last remaining language. Add another language first.',
+          });
+        }
+        doc.languages = nextList;
+      } else {
+        const exists = current.some(
+          (l) => l.toLowerCase() === cleanLang.toLowerCase()
+        );
+        if (!exists) {
+          current.push(cleanLang);
+        }
+        doc.languages = current;
+      }
+
+      await doc.save();
+    }
+
+    invalidateHashtagsCache();
+
+    return res.status(200).json({
+      updatedCount: matchingTags.length,
+      examName: cleanExam,
+      subExamName: cleanSubExam,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * Permanently deletes an admin-created hashtag / topic and cleans up associated quizzes.
+ */
+export async function deleteHashtag(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ error: 'Invalid hashtag id' });
+    }
+
+    const hashtag = await Hashtag.findById(id);
+    if (!hashtag) {
+      return res.status(404).json({ error: 'Hashtag not found' });
+    }
+
+    const quizzesToRemove = await Quiz.find({ hashtag: hashtag._id })
+      .select('_id')
+      .lean();
+    const quizIds = quizzesToRemove.map((q) => q._id);
+
+    await Promise.all([
+      Hashtag.deleteOne({ _id: hashtag._id }),
+      Quiz.deleteMany({ hashtag: hashtag._id }),
+      quizIds.length > 0
+        ? Notification.deleteMany({ quiz: { $in: quizIds } })
+        : Promise.resolve(),
+    ]);
+
+    invalidateHashtagsCache();
+    invalidateLeaderboardCache();
+
+    return res.status(200).json({
+      deleted: true,
+      _id: hashtag._id,
+      deletedQuizzesCount: quizIds.length,
+    });
   } catch (error) {
     return next(error);
   }

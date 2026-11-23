@@ -11,7 +11,14 @@ const userSchema = new Schema(
       index: true,
       trim: true,
     },
+    // Custom creator username chosen inside Quiz-Gram (not taken from Telegram)
     username: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    // Raw Telegram username stored separately for admin reference only
+    telegramUsername: {
       type: String,
       trim: true,
       default: '',

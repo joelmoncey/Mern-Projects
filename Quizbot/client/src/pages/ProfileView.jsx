@@ -12,6 +12,7 @@ import {
   MessageCircle,
   Play,
   Shield,
+  SlidersHorizontal,
   Target,
   Trash2,
   UserCheck,
@@ -23,6 +24,7 @@ import { apiRequest } from '../lib/api.js';
 import { openAdminContactLink } from '../lib/telegram.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import EditQuizModal from '../components/EditQuizModal.jsx';
+import ExamTopicPickerModal from '../components/ExamTopicPickerModal.jsx';
 import QuizCard from '../components/QuizCard.jsx';
 import { formatHierarchyPath } from './CreateQuizView.jsx';
 
@@ -39,14 +41,17 @@ function getTopicMeta(quiz) {
     `${quiz.examName || 'EXAM'}_${quiz.subjectName || 'SUBJECT'}`.toUpperCase();
   const hierarchy =
     formatHierarchyPath(quiz) || `${quiz.examName} › ${quiz.subjectName}`;
-  const shortTitle =
-    quiz.subTopicName ||
-    quiz.hashtag?.subTopicName ||
-    quiz.subSubjectName ||
-    quiz.hashtag?.subSubjectName ||
-    quiz.subjectName ||
-    tag;
-  return { key, tag, hierarchy, shortTitle };
+  return {
+    key,
+    tag,
+    hierarchy,
+    examName: quiz.examName || quiz.hashtag?.examName || '',
+    subExamName: quiz.subExamName || quiz.hashtag?.subExamName || '',
+    subjectName: quiz.subjectName || quiz.hashtag?.subjectName || '',
+    subSubjectName: quiz.subSubjectName || quiz.hashtag?.subSubjectName || '',
+    subTopicName: quiz.subTopicName || quiz.hashtag?.subTopicName || '',
+    hashtagId: quiz.hashtag?._id || '',
+  };
 }
 
 function ProfileQuizItem({
@@ -127,6 +132,11 @@ function ProfileQuizItem({
           <span className="rounded-full bg-slate-900 px-2.5 py-0.5 text-[10px] font-bold tracking-wider text-white uppercase">
             #{tagLabel}
           </span>
+          {quiz.language && (
+            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-700 uppercase">
+              {quiz.language}
+            </span>
+          )}
           <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
             {hierarchyLabel}
           </span>
@@ -274,10 +284,13 @@ function ProfileQuizItem({
 
 export default function ProfileView({
   targetUserId = null,
+  examFilter = null,
+  onUpdateExamFilter = null,
   onBack = null,
   onOpenAdmin = null,
 }) {
-  const { user, isOfflinePreview, updateUserStats } = useAuth();
+  const { user, isOfflinePreview, updateUserStats, updateUserProfile } =
+    useAuth();
   const [profile, setProfile] = useState(null);
   const [quizzes, setQuizzes] = useState([]);
   const [selectedTopicKey, setSelectedTopicKey] = useState('');
@@ -287,7 +300,33 @@ export default function ProfileView({
   const [editingQuiz, setEditingQuiz] = useState(null);
   const [followBusy, setFollowBusy] = useState(false);
 
+  // Custom creator username editor state (not taken from Telegram)
+  const [editingUsername, setEditingUsername] = useState(false);
+  const [usernameInput, setUsernameInput] = useState('');
+  const [savingUsername, setSavingUsername] = useState(false);
+  const [usernameSuccess, setUsernameSuccess] = useState('');
+
+  const [exams, setExams] = useState([]);
+  const [groupedByExam, setGroupedByExam] = useState({});
+  const [showPickerModal, setShowPickerModal] = useState(false);
+
   const isAdmin = user?.role === 'admin';
+
+  useEffect(() => {
+    if (isOfflinePreview) return;
+    let cancelled = false;
+    apiRequest('/api/hashtags')
+      .then((data) => {
+        if (!cancelled) {
+          setExams(data.exams || []);
+          setGroupedByExam(data.groupedByExam || {});
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isOfflinePreview]);
 
   const loadProfile = useCallback(async () => {
     if (isOfflinePreview) {
@@ -356,7 +395,7 @@ export default function ProfileView({
     loadProfile();
   }, [loadProfile]);
 
-  // Build single-topic buckets (no "All Topics" mixing — users select one topic and scroll)
+  // Build single-topic buckets from this creator's quizzes
   const topics = useMemo(() => {
     const map = new Map();
     for (const q of quizzes) {
@@ -369,11 +408,57 @@ export default function ProfileView({
     return Array.from(map.values());
   }, [quizzes]);
 
+  // Automatically sync selectedTopicKey with the user's global examFilter from the first page
   useEffect(() => {
-    if (topics.length > 0 && !topics.some((t) => t.key === selectedTopicKey)) {
+    if (topics.length === 0) return;
+
+    // 1. Exact hashtag/tag match with examFilter
+    if (examFilter?.hashtagId) {
+      const byId = topics.find(
+        (t) =>
+          String(t.key) === String(examFilter.hashtagId) ||
+          String(t.hashtagId) === String(examFilter.hashtagId)
+      );
+      if (byId) {
+        setSelectedTopicKey(byId.key);
+        return;
+      }
+    }
+
+    // 2. Match by examName + subjectName from examFilter
+    if (examFilter?.examName && examFilter?.subjectName) {
+      const byExamAndSubj = topics.find(
+        (t) =>
+          t.examName.toLowerCase() === examFilter.examName.toLowerCase() &&
+          t.subjectName.toLowerCase() === examFilter.subjectName.toLowerCase()
+      );
+      if (byExamAndSubj) {
+        setSelectedTopicKey(byExamAndSubj.key);
+        return;
+      }
+    }
+
+    // 3. Match by examName from examFilter
+    if (examFilter?.examName) {
+      const byExam = topics.find(
+        (t) => t.examName.toLowerCase() === examFilter.examName.toLowerCase()
+      );
+      if (byExam) {
+        setSelectedTopicKey(byExam.key);
+        return;
+      }
+    }
+
+    // 4. Fallback to first available topic if current key isn't in topics
+    if (!topics.some((t) => t.key === selectedTopicKey)) {
       setSelectedTopicKey(topics[0].key);
     }
-  }, [topics, selectedTopicKey]);
+  }, [
+    topics,
+    examFilter?.hashtagId,
+    examFilter?.examName,
+    examFilter?.subjectName,
+  ]);
 
   const activeTopic = useMemo(
     () => topics.find((t) => t.key === selectedTopicKey) || topics[0] || null,
@@ -382,8 +467,32 @@ export default function ProfileView({
 
   const selectedTopicQuizzes = useMemo(() => {
     if (!activeTopic) return [];
-    return quizzes.filter((q) => getTopicKey(q) === activeTopic.key);
-  }, [quizzes, activeTopic]);
+    const byTopic = quizzes.filter((q) => getTopicKey(q) === activeTopic.key);
+    if (examFilter?.language) {
+      const byLang = byTopic.filter(
+        (q) =>
+          (q.language || 'English').toLowerCase() ===
+          examFilter.language.toLowerCase()
+      );
+      if (byLang.length > 0) return byLang;
+    }
+    return byTopic;
+  }, [quizzes, activeTopic, examFilter?.language]);
+
+  function handleSelectTopic(topic) {
+    setSelectedTopicKey(topic.key);
+    // Keep the user's global exam/subject selection synced when they pick a topic here
+    onUpdateExamFilter?.({
+      examName: topic.examName,
+      subExamName: topic.subExamName || '',
+      subjectName: topic.subjectName,
+      subSubjectName: topic.subSubjectName || '',
+      subTopicName: topic.subTopicName || '',
+      hashtagId: topic.hashtagId || '',
+      tag: topic.tag || '',
+      label: topic.hierarchy,
+    });
+  }
 
   function handleProfileQuizAttempted(userStats, quizId, nextAttemptsCount) {
     updateUserStats(userStats);
@@ -469,6 +578,51 @@ export default function ProfileView({
     );
   }
 
+  function handleStartEditUsername() {
+    setError('');
+    setUsernameSuccess('');
+    setUsernameInput(profile?.username || '');
+    setEditingUsername(true);
+  }
+
+  async function handleSaveUsername(e) {
+    e.preventDefault();
+    const clean = usernameInput.trim().replace(/^@+/, '');
+    if (!clean) {
+      setError('Please enter a custom creator username.');
+      return;
+    }
+
+    setError('');
+    setUsernameSuccess('');
+
+    if (isOfflinePreview) {
+      setProfile((prev) => (prev ? { ...prev, username: clean } : prev));
+      updateUserProfile?.({ username: clean });
+      setEditingUsername(false);
+      setUsernameSuccess(`Creator username set to @${clean}`);
+      return;
+    }
+
+    setSavingUsername(true);
+    try {
+      const data = await apiRequest('/api/users/me/username', {
+        method: 'PATCH',
+        body: { username: clean },
+      });
+      setProfile((prev) =>
+        prev ? { ...prev, username: data.username } : prev
+      );
+      updateUserProfile?.({ username: data.username });
+      setEditingUsername(false);
+      setUsernameSuccess(`Creator username updated to @${data.username}`);
+    } catch (err) {
+      setError(err.message || 'Could not update creator username');
+    } finally {
+      setSavingUsername(false);
+    }
+  }
+
   const initial = (
     profile?.firstName ||
     profile?.username ||
@@ -476,6 +630,10 @@ export default function ProfileView({
   )
     .charAt(0)
     .toUpperCase();
+
+  // Can manage (Edit/Delete) quizzes on this profile:
+  // Either it's the user's own profile, OR the viewer is an admin inspecting this Creator Profile
+  const canManageQuizzesHere = Boolean(profile?.canManageQuizzes || isAdmin);
 
   // Full-Screen Vertical Snap-Scroll Mode for the Selected Topic on Creator's Profile
   if (fullScreenScrollMode && activeTopic) {
@@ -508,23 +666,10 @@ export default function ProfileView({
               key={quiz._id}
               quiz={quiz}
               isOfflinePreview={isOfflinePreview}
-              canManage={Boolean(profile?.canManageQuizzes || isAdmin)}
               onStatsUpdated={updateUserStats}
-              onEditQuiz={handleOpenEditQuiz}
-              onDeleteQuiz={handleDeleteQuiz}
             />
           ))}
         </div>
-
-        {editingQuiz && (
-          <EditQuizModal
-            quiz={editingQuiz}
-            onClose={() => setEditingQuiz(null)}
-            onSaved={() => {
-              loadProfile();
-            }}
-          />
-        )}
       </div>
     );
   }
@@ -549,7 +694,9 @@ export default function ProfileView({
               {profile?.isOwnProfile === false ? 'Creator Profile' : 'My Profile'}
             </h1>
             <p className="text-xs text-slate-500">
-              Select a topic below to scroll quizzes
+              {canManageQuizzesHere
+                ? 'Select a topic to view, edit, or delete quizzes'
+                : 'Select one topic below to scroll quizzes'}
             </p>
           </div>
         </div>
@@ -564,14 +711,14 @@ export default function ProfileView({
             <span>Contact Admin</span>
           </button>
 
-          {isAdmin && onOpenAdmin && (
+          {isAdmin && onOpenAdmin && profile?.isOwnProfile && (
             <button
               type="button"
               onClick={onOpenAdmin}
               className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-slate-800 active:scale-95"
             >
               <Shield className="h-3.5 w-3.5" />
-              <span>Admin</span>
+              <span>Admin Console</span>
             </button>
           )}
         </div>
@@ -615,9 +762,27 @@ export default function ProfileView({
                       </span>
                     ) : null}
                   </div>
-                  <p className="truncate text-xs font-medium text-slate-500">
-                    @{profile.username || 'aspirant'}
-                  </p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                    <p className="truncate text-xs font-semibold text-slate-600">
+                      {profile.username
+                        ? `@${profile.username}`
+                        : 'No creator username set'}
+                    </p>
+                    {profile.isOwnProfile && !editingUsername && (
+                      <button
+                        type="button"
+                        onClick={handleStartEditUsername}
+                        className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-slate-100 active:scale-95"
+                      >
+                        <Edit3 className="h-2.5 w-2.5" />
+                        <span>
+                          {profile.username
+                            ? 'Edit Username'
+                            : 'Create Username'}
+                        </span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -646,6 +811,56 @@ export default function ProfileView({
                 </button>
               )}
             </div>
+
+            {/* Inline Custom Creator Username Editor (not from Telegram) */}
+            {profile.isOwnProfile && editingUsername && (
+              <form
+                onSubmit={handleSaveUsername}
+                className="mt-3 flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3"
+              >
+                <label className="text-[11px] font-bold text-slate-700">
+                  Custom Creator Username (3–24 chars, independent of Telegram)
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="flex flex-1 items-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 focus-within:border-slate-900">
+                    <span className="mr-1 text-xs font-bold text-slate-400">
+                      @
+                    </span>
+                    <input
+                      type="text"
+                      required
+                      maxLength={24}
+                      value={usernameInput}
+                      onChange={(e) =>
+                        setUsernameInput(e.target.value.replace(/^@+/, ''))
+                      }
+                      placeholder="your_creator_name"
+                      className="w-full bg-transparent text-xs font-semibold text-slate-900 outline-none"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={savingUsername}
+                    className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-bold text-white shadow-2xs hover:bg-slate-800 disabled:opacity-60"
+                  >
+                    {savingUsername ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingUsername(false)}
+                    className="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {usernameSuccess && (
+              <div className="mt-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
+                ✓ {usernameSuccess}
+              </div>
+            )}
 
             {/* 4-Card Stats Grid */}
             <div className="mt-4 grid grid-cols-4 gap-2">
@@ -691,7 +906,7 @@ export default function ProfileView({
             </div>
           </div>
 
-          {/* Single-Topic Selector + Scroll Section */}
+          {/* Single-Topic Selector (Pre-selected from user's Exam & Subject filter) + Scroll Section */}
           {quizzes.length === 0 ? (
             <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-xs text-slate-500 shadow-2xs">
               No quizzes published yet.
@@ -699,24 +914,38 @@ export default function ProfileView({
           ) : (
             <>
               <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-2xs">
-                <div className="mb-2 flex items-center justify-between">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-slate-500 uppercase">
                     <Layers className="h-3.5 w-3.5 text-slate-700" />
-                    Select One Topic ({topics.length})
+                    Selected Topic ({topics.length})
                   </span>
-                  {selectedTopicQuizzes.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setFullScreenScrollMode(true)}
-                      className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-3 py-1 text-[11px] font-bold text-white shadow-2xs hover:bg-slate-800 active:scale-95"
-                    >
-                      <Play className="h-3 w-3 fill-white" />
-                      <span>Scroll Topic Feed ({selectedTopicQuizzes.length})</span>
-                    </button>
-                  )}
+
+                  <div className="flex items-center gap-1.5">
+                    {exams.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowPickerModal(true)}
+                        className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-100 active:scale-95"
+                      >
+                        <SlidersHorizontal className="h-3 w-3" />
+                        <span>Edit Exam / Subject</span>
+                      </button>
+                    )}
+
+                    {selectedTopicQuizzes.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFullScreenScrollMode(true)}
+                        className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-3 py-1 text-[11px] font-bold text-white shadow-2xs hover:bg-slate-800 active:scale-95"
+                      >
+                        <Play className="h-3 w-3 fill-white" />
+                        <span>Scroll Topic ({selectedTopicQuizzes.length})</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                {/* Topic Selector Chips (strictly single-select, no "All" mixing) */}
+                {/* Single-Topic Selector Chips (Strictly 1 topic active at a time) */}
                 <div className="flex flex-wrap gap-1.5">
                   {topics.map((topic) => {
                     const active = activeTopic?.key === topic.key;
@@ -724,14 +953,14 @@ export default function ProfileView({
                       <button
                         key={topic.key}
                         type="button"
-                        onClick={() => setSelectedTopicKey(topic.key)}
+                        onClick={() => handleSelectTopic(topic)}
                         className={`rounded-xl border px-3 py-1.5 text-left text-xs font-bold transition active:scale-95 ${
                           active
                             ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
                             : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
                         }`}
                       >
-                        <span>#{topic.tag}</span>
+                        <span>{topic.hierarchy}</span>
                         <span
                           className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] ${
                             active
@@ -745,12 +974,6 @@ export default function ProfileView({
                     );
                   })}
                 </div>
-
-                {activeTopic && (
-                  <p className="mt-2 truncate text-[11px] font-medium text-slate-500">
-                    Topic Path: <span className="font-semibold text-slate-800">{activeTopic.hierarchy}</span>
-                  </p>
-                )}
               </div>
 
               <div className="flex flex-col gap-3">
@@ -758,7 +981,7 @@ export default function ProfileView({
                   <ProfileQuizItem
                     key={quiz._id}
                     quiz={quiz}
-                    canManage={Boolean(profile.canManageQuizzes || isAdmin)}
+                    canManage={canManageQuizzesHere}
                     isOfflinePreview={isOfflinePreview}
                     onEdit={handleOpenEditQuiz}
                     onDelete={handleDeleteQuiz}
@@ -777,6 +1000,19 @@ export default function ProfileView({
           onClose={() => setEditingQuiz(null)}
           onSaved={() => {
             loadProfile();
+          }}
+        />
+      )}
+
+      {showPickerModal && exams.length > 0 && (
+        <ExamTopicPickerModal
+          exams={exams}
+          groupedByExam={groupedByExam}
+          currentFilter={examFilter}
+          onClose={() => setShowPickerModal(false)}
+          onApply={(nextFilter) => {
+            onUpdateExamFilter?.(nextFilter);
+            setShowPickerModal(false);
           }}
         />
       )}

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Flame, Loader2, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Flame, Loader2, RefreshCw, SlidersHorizontal } from 'lucide-react';
 import { apiRequest } from '../lib/api.js';
 import { getDeepLinkedQuizId } from '../lib/telegram.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import QuizCard from '../components/QuizCard.jsx';
-import EditQuizModal from '../components/EditQuizModal.jsx';
+import ExamTopicPickerModal from '../components/ExamTopicPickerModal.jsx';
 
 const OFFLINE_SAMPLE_QUIZZES = [
   {
@@ -70,12 +70,18 @@ const OFFLINE_SAMPLE_QUIZZES = [
   },
 ];
 
-export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
+export default function FeedView({
+  examFilter,
+  onUpdateExamFilter,
+  onOpenCreate,
+  onOpenCreatorProfile,
+}) {
   const { user, isOfflinePreview, updateUserStats } = useAuth();
   const [exams, setExams] = useState([]);
-  // No 'ALL' tab — defaults strictly to a single exam so questions never get mixed
-  const [selectedExam, setSelectedExam] = useState('');
+  const [groupedByExam, setGroupedByExam] = useState({});
   const [examsLoaded, setExamsLoaded] = useState(false);
+  const [showPickerModal, setShowPickerModal] = useState(false);
+
   const [feedTab, setFeedTab] = useState('forYou');
   const [quizzes, setQuizzes] = useState([]);
   const [seenHashes, setSeenHashes] = useState([]);
@@ -83,20 +89,19 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
-  const [editingQuiz, setEditingQuiz] = useState(null);
 
   const sentinelRef = useRef(null);
   const initialDeepLinkRef = useRef(getDeepLinkedQuizId());
 
-  const isAdmin = user?.role === 'admin';
-
   useEffect(() => {
     if (isOfflinePreview) {
       const demoExams = ['UPSC', 'SSC'];
+      const demoGrouped = {
+        UPSC: [OFFLINE_SAMPLE_QUIZZES[0].hashtag],
+        SSC: [OFFLINE_SAMPLE_QUIZZES[1].hashtag],
+      };
       setExams(demoExams);
-      setSelectedExam((prev) =>
-        prev && demoExams.includes(prev) ? prev : demoExams[0]
-      );
+      setGroupedByExam(demoGrouped);
       setExamsLoaded(true);
       return;
     }
@@ -106,13 +111,28 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
       .then((data) => {
         if (cancelled) return;
         const examList = data.exams || [];
+        const grouped = data.groupedByExam || {};
         setExams(examList);
-        if (examList.length > 0) {
-          setSelectedExam((prev) =>
-            prev && examList.includes(prev) ? prev : examList[0]
-          );
-        } else {
-          setSelectedExam('');
+        setGroupedByExam(grouped);
+
+        // If user has no saved exam yet and exams exist, prompt initial picker or set default
+        if (examList.length > 0 && !examFilter?.examName) {
+          const firstExam = examList[0];
+          const firstTag = grouped[firstExam]?.[0];
+          const firstSubject = firstTag?.subjectName || '';
+          const firstLang = firstTag?.languages?.[0] || 'English';
+          onUpdateExamFilter?.({
+            examName: firstExam,
+            subExamName: '',
+            language: firstLang,
+            subjectName: firstSubject,
+            subSubjectName: '',
+            subTopicName: '',
+            hashtagId: '',
+            tag: '',
+            label: `${[firstExam, firstSubject].filter(Boolean).join(' › ')} (${firstLang})`,
+          });
+          setShowPickerModal(true);
         }
       })
       .catch(() => {})
@@ -125,13 +145,29 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
     };
   }, [isOfflinePreview]);
 
+  const activeExam = examFilter?.examName || exams[0] || '';
+  const activeLanguage = examFilter?.language || '';
+  const activeSubject = examFilter?.subjectName || '';
+
+  // Subjects available under the currently active exam for quick 1-tap switching
+  const subjectsForActiveExam = useMemo(() => {
+    const tags = groupedByExam[activeExam] || [];
+    return Array.from(
+      new Set(tags.map((t) => (t.subjectName || '').trim()).filter(Boolean))
+    );
+  }, [groupedByExam, activeExam]);
+
   const fetchBatch = useCallback(
     async ({ reset = false, currentSeen = [] } = {}) => {
       if (!examsLoaded) return;
 
       if (isOfflinePreview) {
-        const filtered = selectedExam
-          ? OFFLINE_SAMPLE_QUIZZES.filter((q) => q.examName === selectedExam)
+        const filtered = activeExam
+          ? OFFLINE_SAMPLE_QUIZZES.filter(
+              (q) =>
+                q.examName === activeExam &&
+                (!activeSubject || q.subjectName === activeSubject)
+            )
           : OFFLINE_SAMPLE_QUIZZES;
         setQuizzes(filtered);
         setHasMore(false);
@@ -140,7 +176,7 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
         return;
       }
 
-      if (!selectedExam && exams.length === 0) {
+      if (!activeExam && exams.length === 0) {
         setQuizzes([]);
         setHasMore(false);
         setLoading(false);
@@ -159,8 +195,23 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
         const params = new URLSearchParams();
         params.set('limit', '12');
         params.set('tab', feedTab);
-        if (selectedExam) {
-          params.set('examName', selectedExam);
+        if (activeExam) {
+          params.set('examName', activeExam);
+        }
+        if (examFilter?.subExamName) {
+          params.set('subExamName', examFilter.subExamName);
+        }
+        if (activeLanguage) {
+          params.set('language', activeLanguage);
+        }
+        if (activeSubject) {
+          params.set('subjectName', activeSubject);
+        }
+        if (examFilter?.subSubjectName) {
+          params.set('subSubjectName', examFilter.subSubjectName);
+        }
+        if (examFilter?.hashtagId) {
+          params.set('hashtag', examFilter.hashtagId);
         }
         if (reset && initialDeepLinkRef.current) {
           params.set('prioritizeQuizId', initialDeepLinkRef.current);
@@ -184,7 +235,18 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
         setLoadingMore(false);
       }
     },
-    [examsLoaded, selectedExam, exams.length, feedTab, isOfflinePreview]
+    [
+      examsLoaded,
+      activeExam,
+      activeLanguage,
+      activeSubject,
+      examFilter?.subExamName,
+      examFilter?.subSubjectName,
+      examFilter?.hashtagId,
+      exams.length,
+      feedTab,
+      isOfflinePreview,
+    ]
   );
 
   useEffect(() => {
@@ -221,32 +283,32 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
     );
   }
 
-  async function handleOpenEditQuiz(quiz) {
-    if (isOfflinePreview) {
-      setEditingQuiz(quiz);
-      return;
-    }
-    try {
-      const data = await apiRequest(`/api/quizzes/${quiz._id}`);
-      setEditingQuiz(data.quiz);
-    } catch {
-      setEditingQuiz(quiz);
-    }
+  function handleQuickSwitchSubject(subj) {
+    const lang = activeLanguage || 'English';
+    onUpdateExamFilter?.({
+      examName: activeExam,
+      subExamName: '',
+      language: lang,
+      subjectName: subj,
+      subSubjectName: '',
+      subTopicName: '',
+      hashtagId: '',
+      tag: '',
+      label: `${[activeExam, subj].filter(Boolean).join(' › ')} (${lang})`,
+    });
   }
 
-  async function handleDeleteQuiz(quizId) {
-    if (!isOfflinePreview) {
-      await apiRequest(`/api/quizzes/${quizId}`, { method: 'DELETE' });
-    }
-    setQuizzes((prev) => prev.filter((q) => q._id !== quizId));
-  }
+  const activeFilterSummary =
+    examFilter?.label ||
+    [activeExam, activeSubject].filter(Boolean).join(' › ') ||
+    'Select Exam & Subject';
 
   return (
     <div className="relative h-dvh w-full bg-[#F8FAFC]">
-      {/* Translucent White Top Header */}
-      <header className="fixed inset-x-0 top-0 z-20 mx-auto max-w-md border-b border-slate-200 bg-white/95 px-4 pt-3 pb-2.5 shadow-2xs backdrop-blur-md">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-5">
+      {/* Translucent White Top Header with Exam/Subject Filter + "Edit" Button */}
+      <header className="fixed inset-x-0 top-0 z-20 mx-auto max-w-md border-b border-slate-200 bg-white/95 px-4 pt-2.5 pb-2.5 shadow-2xs backdrop-blur-md">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-4">
             <button
               type="button"
               onClick={() => setFeedTab('forYou')}
@@ -277,38 +339,52 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {user && (
               <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-bold text-amber-700">
                 <Flame className="h-3 w-3 fill-amber-500 text-amber-500" />
                 {user.streakCount || 0}
               </span>
             )}
-            {isOfflinePreview && (
-              <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[10px] font-semibold tracking-wider text-slate-600 uppercase">
-                Preview
-              </span>
+
+            {/* Active Exam & Subject Pill + Edit Button */}
+            {exams.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowPickerModal(true)}
+                className="inline-flex max-w-[195px] items-center gap-1.5 rounded-full bg-slate-900 px-3 py-1 text-[11px] font-bold text-white shadow-2xs transition hover:bg-slate-800 active:scale-95"
+                title="Change Exam & Subject"
+              >
+                <SlidersHorizontal className="h-3 w-3 shrink-0" />
+                <span className="truncate">{activeFilterSummary}</span>
+                <span className="rounded-full bg-white/20 px-1.5 py-0.2 text-[9px] uppercase">
+                  Edit
+                </span>
+              </button>
             )}
           </div>
         </div>
 
-        {/* Single-Exam Selector Pills (No "All Exams" mixing) */}
-        {exams.length > 0 && (
-          <div className="mt-2.5 flex gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {exams.map((exam) => {
-              const active = selectedExam === exam;
+        {/* Quick Subject Switcher Pills inside the Selected Exam */}
+        {subjectsForActiveExam.length > 0 && (
+          <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <span className="shrink-0 rounded-full border border-slate-300 bg-slate-100 px-2.5 py-0.5 text-[10px] font-extrabold tracking-wider text-slate-800 uppercase">
+              {activeExam}
+            </span>
+            {subjectsForActiveExam.map((subj) => {
+              const active = activeSubject === subj;
               return (
                 <button
-                  key={exam}
+                  key={subj}
                   type="button"
-                  onClick={() => setSelectedExam(exam)}
-                  className={`shrink-0 rounded-full border px-3.5 py-1 text-[11px] font-bold tracking-wide uppercase transition active:scale-95 ${
+                  onClick={() => handleQuickSwitchSubject(subj)}
+                  className={`shrink-0 rounded-full border px-3 py-0.5 text-[11px] font-bold transition active:scale-95 ${
                     active
-                      ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
-                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900'
+                      ? 'border-emerald-600 bg-emerald-600 text-white shadow-2xs'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
                   }`}
                 >
-                  {exam}
+                  {subj}
                 </button>
               );
             })}
@@ -338,27 +414,36 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
         <div className="flex h-dvh flex-col items-center justify-center gap-3 px-8 text-center">
           <p className="text-base font-bold text-slate-900">
             {feedTab === 'following'
-              ? 'No quizzes from creators you follow in this exam yet'
-              : selectedExam
-                ? `No quizzes in ${selectedExam} yet`
-                : 'No quizzes published yet'}
+              ? 'No quizzes from creators you follow in this topic yet'
+              : `No quizzes in ${activeFilterSummary} yet`}
           </p>
           <p className="text-xs text-slate-500">
-            {feedTab === 'following'
-              ? 'Switch to For You and follow creators whose questions help your prep.'
-              : 'Be the first to publish a syllabus-aligned question for this exam.'}
+            Tap &ldquo;Edit Exam &amp; Subject&rdquo; to switch to another exam or
+            subject, or publish the first question for this topic.
           </p>
-          <button
-            type="button"
-            onClick={() =>
-              feedTab === 'following'
-                ? setFeedTab('forYou')
-                : onOpenCreate?.()
-            }
-            className="mt-1 rounded-full bg-slate-900 px-5 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-slate-800 active:scale-95"
-          >
-            {feedTab === 'following' ? 'Explore For You' : 'Create a Quiz'}
-          </button>
+          <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+            {exams.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowPickerModal(true)}
+                className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-slate-800 active:scale-95"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                <span>Edit Exam &amp; Subject</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() =>
+                feedTab === 'following'
+                  ? setFeedTab('forYou')
+                  : onOpenCreate?.()
+              }
+              className="rounded-full border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-2xs hover:bg-slate-50"
+            >
+              {feedTab === 'following' ? 'Explore For You' : 'Create a Quiz'}
+            </button>
+          </div>
         </div>
       ) : (
         <div className="quiz-feed-scroll">
@@ -367,12 +452,9 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
               key={quiz._id}
               quiz={quiz}
               isOfflinePreview={isOfflinePreview}
-              canManage={isAdmin || Boolean(quiz.canManage)}
               onStatsUpdated={updateUserStats}
               onFollowChanged={handleFollowChanged}
               onOpenCreatorProfile={onOpenCreatorProfile}
-              onEditQuiz={handleOpenEditQuiz}
-              onDeleteQuiz={handleDeleteQuiz}
             />
           ))}
 
@@ -402,16 +484,15 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
         </div>
       )}
 
-      {editingQuiz && (
-        <EditQuizModal
-          quiz={editingQuiz}
-          onClose={() => setEditingQuiz(null)}
-          onSaved={(updatedQuiz) => {
-            setQuizzes((prev) =>
-              prev.map((q) =>
-                q._id === updatedQuiz._id ? { ...q, ...updatedQuiz } : q
-              )
-            );
+      {showPickerModal && exams.length > 0 && (
+        <ExamTopicPickerModal
+          exams={exams}
+          groupedByExam={groupedByExam}
+          currentFilter={examFilter}
+          onClose={() => setShowPickerModal(false)}
+          onApply={(nextFilter) => {
+            onUpdateExamFilter?.(nextFilter);
+            setShowPickerModal(false);
           }}
         />
       )}

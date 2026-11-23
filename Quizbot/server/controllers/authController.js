@@ -17,7 +17,8 @@ function serializeUser(user) {
   return {
     _id: user._id,
     telegramId: user.telegramId,
-    username: user.username,
+    username: user.username || '',
+    telegramUsername: user.telegramUsername || '',
     firstName: user.firstName,
     photoUrl: user.photoUrl,
     role: user.role,
@@ -67,9 +68,11 @@ export async function telegramLogin(req, res, next) {
     const isAdmin = adminIds.has(profile.telegramId);
     const role = isAdmin ? 'admin' : 'user';
 
+    // Store Telegram's username in telegramUsername only; never overwrite the
+    // creator's custom Quiz-Gram username with their Telegram username.
     const updateFields = {
       firstName: profile.firstName,
-      username: profile.username,
+      telegramUsername: profile.username || '',
       photoUrl: profile.photoUrl,
       role,
       ...(isAdmin ? { canCreateQuiz: true } : {}),
@@ -81,6 +84,7 @@ export async function telegramLogin(req, res, next) {
         $set: updateFields,
         $setOnInsert: {
           telegramId: profile.telegramId,
+          username: '',
           ...(isAdmin ? {} : { canCreateQuiz: false }),
         },
       },

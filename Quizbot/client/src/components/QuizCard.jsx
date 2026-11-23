@@ -2,11 +2,9 @@ import { useState } from 'react';
 import {
   BookOpen,
   Check,
-  Edit3,
   Flag,
   Heart,
   Share2,
-  Trash2,
   UserCheck,
   UserPlus,
   X,
@@ -25,12 +23,9 @@ const FLAG_REASONS = [
 export default function QuizCard({
   quiz,
   isOfflinePreview,
-  canManage = false,
   onStatsUpdated,
   onFollowChanged,
   onOpenCreatorProfile,
-  onEditQuiz,
-  onDeleteQuiz,
 }) {
   const [selectedIndex, setSelectedIndex] = useState(null);
   const [submittingAttempt, setSubmittingAttempt] = useState(false);
@@ -47,8 +42,6 @@ export default function QuizCard({
   const [showFlagSheet, setShowFlagSheet] = useState(false);
   const [flagReason, setFlagReason] = useState('');
   const [submittingFlag, setSubmittingFlag] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
 
   const [toast, setToast] = useState('');
 
@@ -70,8 +63,6 @@ export default function QuizCard({
   )
     .charAt(0)
     .toUpperCase();
-
-  const showManageControls = Boolean(canManage || quiz.canManage);
 
   function flashToast(msg) {
     setToast(msg);
@@ -209,18 +200,6 @@ export default function QuizCard({
     }
   }
 
-  async function handleConfirmDelete() {
-    if (deleting || !onDeleteQuiz) return;
-    setDeleting(true);
-    try {
-      await onDeleteQuiz(quiz._id);
-    } catch (err) {
-      flashToast(err.message || 'Could not delete quiz');
-      setDeleting(false);
-      setConfirmDelete(false);
-    }
-  }
-
   const accuracyPct =
     attemptResult && attemptResult.attemptsCount > 0
       ? Math.round(
@@ -237,69 +216,35 @@ export default function QuizCard({
         </div>
       )}
 
-      {/* Top Metadata Bar: Hashtag + 5-Level Hierarchy Breadcrumb + Admin Edit/Delete */}
-      <div className="flex flex-col gap-1.5 pr-2">
-        <div className="flex flex-wrap items-center justify-between gap-1.5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-[11px] font-bold tracking-wide text-white uppercase shadow-xs">
-              #{tagLabel}
+      {/* Top Metadata Bar: Hashtag + 5-Level Hierarchy Breadcrumb + Syllabus */}
+      <div className="flex flex-col gap-1.5 pr-12">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-[11px] font-bold tracking-wide text-white uppercase shadow-xs">
+            #{tagLabel}
+          </span>
+          {quiz.language && (
+            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-slate-700 uppercase shadow-2xs">
+              {quiz.language}
             </span>
-            {quiz.editCount > 0 && (
-              <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-slate-600 uppercase">
-                Edited
-              </span>
-            )}
-            {syllabusScope && (
-              <button
-                type="button"
-                onClick={() => setShowSyllabus((prev) => !prev)}
-                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition active:scale-95 ${
-                  showSyllabus
-                    ? 'border-slate-900 bg-slate-900 text-white'
-                    : 'border-slate-200 bg-white text-slate-700 shadow-2xs hover:bg-slate-100'
-                }`}
-              >
-                <BookOpen className="h-3 w-3" />
-                <span>Syllabus</span>
-              </button>
-            )}
-          </div>
-
-          {/* Admin / Creator Edit & Delete Controls right on the Feed Card */}
-          {showManageControls && (
-            <div className="flex items-center gap-1">
-              {onEditQuiz && (
-                <button
-                  type="button"
-                  onClick={() => onEditQuiz(quiz)}
-                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 shadow-2xs hover:bg-slate-100 active:scale-95"
-                >
-                  <Edit3 className="h-3 w-3" />
-                  <span>Edit</span>
-                </button>
-              )}
-              {onDeleteQuiz &&
-                (confirmDelete ? (
-                  <button
-                    type="button"
-                    disabled={deleting}
-                    onClick={handleConfirmDelete}
-                    className="inline-flex items-center gap-1 rounded-full bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white shadow-2xs hover:bg-rose-500"
-                  >
-                    <span>{deleting ? '...' : 'Confirm Delete'}</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmDelete(true)}
-                    title="Delete quiz"
-                    aria-label="Delete quiz"
-                    className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white p-1.5 text-slate-500 shadow-2xs hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 active:scale-95"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                ))}
-            </div>
+          )}
+          {quiz.editCount > 0 && (
+            <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-slate-600 uppercase">
+              Edited
+            </span>
+          )}
+          {syllabusScope && (
+            <button
+              type="button"
+              onClick={() => setShowSyllabus((prev) => !prev)}
+              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition active:scale-95 ${
+                showSyllabus
+                  ? 'border-slate-900 bg-slate-900 text-white'
+                  : 'border-slate-200 bg-white text-slate-700 shadow-2xs hover:bg-slate-100'
+              }`}
+            >
+              <BookOpen className="h-3 w-3" />
+              <span>Syllabus</span>
+            </button>
           )}
         </div>
 

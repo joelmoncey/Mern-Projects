@@ -48,6 +48,13 @@ const quizSchema = new Schema(
       trim: true,
       default: '',
     },
+    language: {
+      type: String,
+      required: true,
+      trim: true,
+      default: 'English',
+      index: true,
+    },
     subjectName: {
       type: String,
       required: true,
@@ -188,11 +195,14 @@ quizSchema.pre('validate', function populateQuestionHash(next) {
   next();
 });
 
-// Prevent a creator from posting duplicate questions within the same exam
-quizSchema.index({ creator: 1, examName: 1, questionHash: 1 }, { unique: true });
+// Prevent a creator from posting duplicate questions within the same exam + language
+quizSchema.index(
+  { creator: 1, examName: 1, language: 1, questionHash: 1 },
+  { unique: true }
+);
 
-// High-traffic feed query index
-quizSchema.index({ examName: 1, hashtag: 1, isHidden: 1, createdAt: -1 });
+// High-traffic feed query index (exam + language + hashtag)
+quizSchema.index({ examName: 1, language: 1, hashtag: 1, isHidden: 1, createdAt: -1 });
 
 // Admin escalations queue index
 quizSchema.index({ escalatedToAdmin: 1, isHidden: 1, escalatedAt: -1 });

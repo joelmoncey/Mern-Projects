@@ -95,6 +95,7 @@ export async function createQuiz(req, res, next) {
     const {
       hashtagId,
       hashtag,
+      language,
       question,
       options,
       correctIndex,
@@ -133,9 +134,28 @@ export async function createQuiz(req, res, next) {
       return res.status(400).json({ error: validated.error });
     }
 
+    const allowedLanguages =
+      Array.isArray(hashtagDoc.languages) && hashtagDoc.languages.length > 0
+        ? hashtagDoc.languages
+        : ['English'];
+
+    const requestedLang = String(language || '').trim();
+    const matchedLang = requestedLang
+      ? allowedLanguages.find(
+          (l) => l.toLowerCase() === requestedLang.toLowerCase()
+        )
+      : allowedLanguages[0];
+
+    if (!matchedLang) {
+      return res.status(400).json({
+        error: `Language "${requestedLang}" is not enabled for this exam topic. Allowed: ${allowedLanguages.join(', ')}`,
+      });
+    }
+
     const duplicate = await Quiz.exists({
       creator: req.user._id,
       examName: hashtagDoc.examName,
+      language: matchedLang,
       questionHash: validated.questionHash,
     });
     if (duplicate) {
@@ -147,6 +167,7 @@ export async function createQuiz(req, res, next) {
       hashtag: hashtagDoc._id,
       examName: hashtagDoc.examName,
       subExamName: hashtagDoc.subExamName || '',
+      language: matchedLang,
       subjectName: hashtagDoc.subjectName,
       subSubjectName: hashtagDoc.subSubjectName || '',
       subTopicName: hashtagDoc.subTopicName || '',
@@ -171,7 +192,7 @@ export async function createQuiz(req, res, next) {
       {
         path: 'hashtag',
         select:
-          'examName subExamName subjectName subSubjectName subTopicName tag syllabusScope isActive',
+          'examName subExamName languages subjectName subSubjectName subTopicName tag syllabusScope isActive',
       },
     ]);
 
@@ -188,6 +209,11 @@ export async function getQuizFeed(req, res, next) {
   try {
     const {
       examName,
+      subExamName,
+      language,
+      subjectName,
+      subSubjectName,
+      subTopicName,
       hashtag,
       tab = 'forYou',
       seenHashes,
@@ -231,6 +257,56 @@ export async function getQuizFeed(req, res, next) {
       examName.trim().toUpperCase() !== 'ALL'
     ) {
       query.examName = examName.trim();
+    }
+
+    if (
+      typeof subExamName === 'string' &&
+      subExamName.trim() !== '' &&
+      subExamName.trim().toUpperCase() !== 'ALL'
+    ) {
+      query.subExamName = subExamName.trim();
+    }
+
+    if (
+      typeof language === 'string' &&
+      language.trim() !== '' &&
+      language.trim().toUpperCase() !== 'ALL'
+    ) {
+      const cleanLang = language.trim();
+      const escapedLang = cleanLang.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (cleanLang.toLowerCase() === 'english') {
+        query.$or = [
+          { language: new RegExp(`^${escapedLang}$`, 'i') },
+          { language: { $exists: false } },
+          { language: '' },
+        ];
+      } else {
+        query.language = new RegExp(`^${escapedLang}$`, 'i');
+      }
+    }
+
+    if (
+      typeof subjectName === 'string' &&
+      subjectName.trim() !== '' &&
+      subjectName.trim().toUpperCase() !== 'ALL'
+    ) {
+      query.subjectName = subjectName.trim();
+    }
+
+    if (
+      typeof subSubjectName === 'string' &&
+      subSubjectName.trim() !== '' &&
+      subSubjectName.trim().toUpperCase() !== 'ALL'
+    ) {
+      query.subSubjectName = subSubjectName.trim();
+    }
+
+    if (
+      typeof subTopicName === 'string' &&
+      subTopicName.trim() !== '' &&
+      subTopicName.trim().toUpperCase() !== 'ALL'
+    ) {
+      query.subTopicName = subTopicName.trim();
     }
 
     if (typeof hashtag === 'string' && hashtag.trim() !== '') {
@@ -304,6 +380,7 @@ export async function getQuizFeed(req, res, next) {
         hashtag: q.hashtag,
         examName: q.examName,
         subExamName: q.subExamName || q.hashtag?.subExamName || '',
+        language: q.language || 'English',
         subjectName: q.subjectName,
         subSubjectName: q.subSubjectName || q.hashtag?.subSubjectName || '',
         subTopicName: q.subTopicName || q.hashtag?.subTopicName || '',

@@ -43,6 +43,7 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
   const [selectedSubject, setSelectedSubject] = useState('ALL');
   const [selectedSubSubject, setSelectedSubSubject] = useState('ALL');
   const [selectedHashtagId, setSelectedHashtagId] = useState('');
+  const [selectedLanguage, setSelectedLanguage] = useState('English');
 
   const [question, setQuestion] = useState('');
   const [options, setOptions] = useState(['', '', '', '']);
@@ -194,6 +195,26 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
     [examTags, selectedHashtagId]
   );
 
+  const availableLanguages = useMemo(() => {
+    if (
+      activeHashtag &&
+      Array.isArray(activeHashtag.languages) &&
+      activeHashtag.languages.length > 0
+    ) {
+      return activeHashtag.languages;
+    }
+    return ['English'];
+  }, [activeHashtag]);
+
+  useEffect(() => {
+    if (
+      availableLanguages.length > 0 &&
+      !availableLanguages.includes(selectedLanguage)
+    ) {
+      setSelectedLanguage(availableLanguages[0]);
+    }
+  }, [availableLanguages, selectedLanguage]);
+
   if (!canCreate) {
     return (
       <div className="flex h-dvh flex-col justify-center bg-[#F8FAFC] px-5 pb-20">
@@ -302,6 +323,7 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
         method: 'POST',
         body: {
           hashtagId: selectedHashtagId,
+          language: selectedLanguage,
           question: question.trim(),
           options: options.map((o) => o.trim()),
           correctIndex: Number(correctIndex),
@@ -484,6 +506,33 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
                     </option>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            {/* Allowed Language / Medium Selector for this Exam & Sub Exam */}
+            <div>
+              <label className="mb-1.5 block text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                6. Question Language / Medium
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {availableLanguages.map((lang) => {
+                  const active = selectedLanguage === lang;
+                  return (
+                    <button
+                      key={lang}
+                      type="button"
+                      onClick={() => setSelectedLanguage(lang)}
+                      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold transition active:scale-95 ${
+                        active
+                          ? 'border-emerald-600 bg-emerald-600 text-white shadow-2xs'
+                          : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-white'
+                      }`}
+                    >
+                      {active && <Check className="h-3 w-3 stroke-[3]" />}
+                      <span>{lang}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

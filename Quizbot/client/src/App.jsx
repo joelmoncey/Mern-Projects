@@ -10,12 +10,43 @@ import LeaderboardView from './pages/LeaderboardView.jsx';
 import ProfileView from './pages/ProfileView.jsx';
 import AdminHashtagsView from './pages/AdminHashtagsView.jsx';
 
+const EXAM_FILTER_STORAGE_KEY = 'quiz_gram_exam_filter_v1';
+
+function loadSavedExamFilter() {
+  try {
+    const raw = localStorage.getItem(EXAM_FILTER_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function AppShell() {
   const { user, loading, authMode, error, isOfflinePreview, reauthenticate } =
     useAuth();
   const [activeTab, setActiveTab] = useState('feed');
   const [viewingCreatorId, setViewingCreatorId] = useState(null);
+  const [creatorBackTab, setCreatorBackTab] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [examFilter, setExamFilter] = useState(() => loadSavedExamFilter());
+
+  function handleUpdateExamFilter(nextFilter) {
+    setExamFilter(nextFilter);
+    try {
+      if (nextFilter) {
+        localStorage.setItem(
+          EXAM_FILTER_STORAGE_KEY,
+          JSON.stringify(nextFilter)
+        );
+      } else {
+        localStorage.removeItem(EXAM_FILTER_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
 
   useEffect(() => {
     if (!user || isOfflinePreview) return;
@@ -62,16 +93,26 @@ function AppShell() {
 
   function handleChangeTab(nextTab) {
     setViewingCreatorId(null);
+    setCreatorBackTab(null);
     setActiveTab(nextTab);
   }
 
-  function handleOpenCreatorProfile(creatorId) {
+  function handleOpenCreatorProfile(creatorId, sourceTab = null) {
     if (!creatorId) return;
+    // When admin clicks a creator inside Admin Console, always open that creator's profile
+    // with a Back button returning directly to the Admin Console
+    if (sourceTab === 'admin') {
+      setCreatorBackTab('admin');
+      setViewingCreatorId(String(creatorId));
+      return;
+    }
     if (user && String(creatorId) === String(user._id)) {
       setViewingCreatorId(null);
+      setCreatorBackTab(null);
       setActiveTab('profile');
       return;
     }
+    setCreatorBackTab(currentTab);
     setViewingCreatorId(String(creatorId));
   }
 
@@ -80,11 +121,21 @@ function AppShell() {
       {viewingCreatorId ? (
         <ProfileView
           targetUserId={viewingCreatorId}
-          onBack={() => setViewingCreatorId(null)}
+          examFilter={examFilter}
+          onUpdateExamFilter={handleUpdateExamFilter}
+          onBack={() => {
+            const backTarget = creatorBackTab;
+            setViewingCreatorId(null);
+            setCreatorBackTab(null);
+            if (backTarget) {
+              setActiveTab(backTarget);
+            }
+          }}
           onOpenAdmin={
             isAdmin
               ? () => {
                   setViewingCreatorId(null);
+                  setCreatorBackTab(null);
                   setActiveTab('admin');
                 }
               : null
@@ -94,6 +145,8 @@ function AppShell() {
         <>
           {currentTab === 'feed' && (
             <FeedView
+              examFilter={examFilter}
+              onUpdateExamFilter={handleUpdateExamFilter}
               onOpenCreate={() => handleChangeTab('create')}
               onOpenCreatorProfile={handleOpenCreatorProfile}
             />
@@ -116,6 +169,8 @@ function AppShell() {
           {currentTab === 'profile' && (
             <ProfileView
               targetUserId={null}
+              examFilter={examFilter}
+              onUpdateExamFilter={handleUpdateExamFilter}
               onOpenAdmin={isAdmin ? () => handleChangeTab('admin') : null}
             />
           )}
@@ -128,7 +183,9 @@ function AppShell() {
       )}
 
       <BottomNav
-        activeTab={viewingCreatorId ? 'profile' : currentTab}
+        activeTab={
+          viewingCreatorId ? creatorBackTab || 'profile' : currentTab
+        }
         onChangeTab={handleChangeTab}
         unreadCount={unreadCount}
       />

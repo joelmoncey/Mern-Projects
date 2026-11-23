@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import User from '../models/User.js';
 import Quiz from '../models/Quiz.js';
+import { invalidateLeaderboardCache } from '../utils/cache.js';
 
 function buildProfileResponse({ targetUser, viewerUser, quizzes }) {
   const viewerId = viewerUser ? String(viewerUser._id) : null;
@@ -40,6 +41,7 @@ function buildProfileResponse({ targetUser, viewerUser, quizzes }) {
       hashtag: q.hashtag,
       examName: q.examName,
       subExamName: q.subExamName || q.hashtag?.subExamName || '',
+      language: q.language || 'English',
       subjectName: q.subjectName,
       subSubjectName: q.subSubjectName || q.hashtag?.subSubjectName || '',
       subTopicName: q.subTopicName || q.hashtag?.subTopicName || '',
@@ -112,6 +114,50 @@ export async function getMyProfile(req, res, next) {
   }
 }
 
+export async function updateMyUsername(req, res, next) {
+  try {
+    const rawUsername = String(req.body?.username || '')
+      .trim()
+      .replace(/^@+/, '');
+
+    if (!rawUsername) {
+      return res.status(400).json({ error: 'Please enter a creator username' });
+    }
+
+    if (!/^[a-zA-Z0-9_.]{3,24}$/.test(rawUsername)) {
+      return res.status(400).json({
+        error:
+          'Username must be 3–24 characters using letters, numbers, underscores (_), or dots (.)',
+      });
+    }
+
+    const escaped = rawUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const existing = await User.findOne({
+      _id: { $ne: req.user._id },
+      username: new RegExp(`^${escaped}$`, 'i'),
+    })
+      .select('_id')
+      .lean();
+
+    if (existing) {
+      return res.status(409).json({
+        error: `Username @${rawUsername} is already taken. Please choose another.`,
+      });
+    }
+
+    req.user.username = rawUsername;
+    await req.user.save();
+
+    invalidateLeaderboardCache();
+
+    return res.status(200).json({
+      username: req.user.username,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 export async function getUserProfile(req, res, next) {
   try {
     const { id } = req.params;
@@ -164,6 +210,7 @@ export async function listUsersForAdmin(req, res, next) {
       const regex = new RegExp(escaped, 'i');
       filter.$or = [
         { username: regex },
+        { telegramUsername: regex },
         { firstName: regex },
         { telegramId: regex },
       ];
@@ -173,7 +220,7 @@ export async function listUsersForAdmin(req, res, next) {
       .sort({ role: 1, canCreateQuiz: -1, createdAt: -1 })
       .limit(60)
       .select(
-        'telegramId username firstName photoUrl role canCreateQuiz totalSolved correctSolved streakCount createdAt'
+        'telegramId username telegramUsername firstName photoUrl role canCreateQuiz totalSolved correctSolved streakCount createdAt'
       )
       .lean();
 
@@ -244,6 +291,7 @@ export async function approveCreatorByIdentifier(req, res, next) {
       $or: [
         { telegramId: cleaned },
         { username: new RegExp(`^${escaped}$`, 'i') },
+        { telegramUsername: new RegExp(`^${escaped}$`, 'i') },
       ],
     });
 

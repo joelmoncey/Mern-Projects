@@ -14,6 +14,18 @@ const hashtagSchema = new Schema(
       trim: true,
       default: '',
     },
+    // Allowed languages for this exam / sub-exam topic (managed by admin)
+    languages: {
+      type: [String],
+      default: ['English'],
+      validate: {
+        validator: (arr) =>
+          Array.isArray(arr) &&
+          arr.length > 0 &&
+          arr.every((lang) => typeof lang === 'string' && lang.trim().length > 0),
+        message: 'At least one language is required',
+      },
+    },
     subjectName: {
       type: String,
       required: true,

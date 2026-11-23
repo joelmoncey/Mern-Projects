@@ -90,6 +90,11 @@ export function AuthProvider({ children }) {
     );
   }, []);
 
+  const updateUserProfile = useCallback((partial) => {
+    if (!partial) return;
+    setUser((prev) => (prev ? { ...prev, ...partial } : prev));
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -101,6 +106,7 @@ export function AuthProvider({ children }) {
         isOfflinePreview: authMode === 'offline-preview',
         reauthenticate: authenticate,
         updateUserStats,
+        updateUserProfile,
       }}
     >
       {children}

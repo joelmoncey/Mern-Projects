@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   getMyProfile,
+  updateMyUsername,
   getUserProfile,
   listUsersForAdmin,
   updateCreatorAccess,
@@ -13,6 +14,7 @@ import { actionLimiter } from '../middleware/rateLimiter.js';
 const router = Router();
 
 router.get('/me', protect, getMyProfile);
+router.patch('/me/username', protect, actionLimiter, updateMyUsername);
 router.get('/admin/list', protect, adminOnly, listUsersForAdmin);
 router.post('/admin/approve-creator', protect, adminOnly, approveCreatorByIdentifier);
 router.patch('/:id/creator-access', protect, adminOnly, updateCreatorAccess);

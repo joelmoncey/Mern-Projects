@@ -8,7 +8,8 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "test": "node --test",
-    "seed:ssc": "node scripts/seedSscTaxonomy.js"
+    "seed:ssc": "node scripts/seedSscTaxonomy.js",
+    "seed:upsc-rrb": "node scripts/seedUpscRrbTaxonomy.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

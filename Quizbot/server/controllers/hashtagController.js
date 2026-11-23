@@ -10,7 +10,9 @@ import {
   invalidateLeaderboardCache,
 } from '../utils/cache.js';
 import {
+  ALL_OFFICIAL_TAXONOMY_PRESET,
   SSC_TAXONOMY_PRESET,
+  UPSC_RRB_TAXONOMY_PRESET,
   normalizeEnglishTopicLabel,
 } from '../utils/sscTaxonomySeed.js';
 
@@ -480,6 +482,17 @@ export async function upsertTaxonomyItems(items) {
           subSubjectName: item.subSubjectName,
           subTopicName: item.subTopicName,
         },
+        ...(item.customTag
+          ? [
+              {
+                examName: item.examName,
+                customTag: item.customTag,
+                subjectName: item.subjectName,
+                subSubjectName: item.subSubjectName,
+                subTopicName: item.subTopicName,
+              },
+            ]
+          : []),
       ],
     });
 
@@ -531,18 +544,23 @@ export async function upsertTaxonomyItems(items) {
 
 export async function bulkImportHashtags(req, res, next) {
   try {
-    const { taxonomy, useSscPreset } = req.body || {};
+    const { taxonomy, useSscPreset, useUpscRrbPreset, useAllPresets } =
+      req.body || {};
 
-    const sourceList = useSscPreset
-      ? SSC_TAXONOMY_PRESET
-      : Array.isArray(taxonomy)
-        ? taxonomy
-        : null;
+    const sourceList = useAllPresets
+      ? ALL_OFFICIAL_TAXONOMY_PRESET
+      : useUpscRrbPreset
+        ? UPSC_RRB_TAXONOMY_PRESET
+        : useSscPreset
+          ? ALL_OFFICIAL_TAXONOMY_PRESET
+          : Array.isArray(taxonomy)
+            ? taxonomy
+            : null;
 
     if (!sourceList || sourceList.length === 0) {
       return res.status(400).json({
         error:
-          'Provide a valid taxonomy JSON array or set useSscPreset: true',
+          'Provide a valid taxonomy JSON array or set useSscPreset / useUpscRrbPreset / useAllPresets: true',
       });
     }
 

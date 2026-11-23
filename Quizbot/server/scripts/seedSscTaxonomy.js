@@ -2,17 +2,17 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 import { connectDB } from '../config/db.js';
 import { upsertTaxonomyItems } from '../controllers/hashtagController.js';
-import { SSC_TAXONOMY_PRESET } from '../utils/sscTaxonomySeed.js';
+import { ALL_OFFICIAL_TAXONOMY_PRESET } from '../utils/sscTaxonomySeed.js';
 
 async function runSeed() {
   try {
     const conn = await connectDB();
     if (!conn) {
-      console.error('Cannot seed SSC taxonomy without MONGO_URI.');
+      console.error('Cannot seed official taxonomy without MONGO_URI.');
       process.exit(1);
     }
 
-    const result = await upsertTaxonomyItems(SSC_TAXONOMY_PRESET);
+    const result = await upsertTaxonomyItems(ALL_OFFICIAL_TAXONOMY_PRESET);
     console.log(
       `[seed:ssc] Completed! Created: ${result.createdCount}, Updated: ${result.updatedCount}, Total Topics: ${result.totalProcessed}`
     );

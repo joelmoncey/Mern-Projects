@@ -23,8 +23,9 @@ import {
 } from 'lucide-react';
 import { apiRequest } from '../lib/api.js';
 import {
+  ALL_OFFICIAL_TAXONOMY_JSON_PRESET,
   SSC_SUB_EXAM_PRESETS,
-  SSC_TAXONOMY_JSON_PRESET,
+  UPSC_RRB_TAXONOMY_JSON_PRESET,
   extractLanguagesArray,
   extractSubExamsArray,
 } from '../lib/sscTaxonomyPreset.js';
@@ -66,6 +67,7 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
   const [jsonImportText, setJsonImportText] = useState('');
   const [importingJson, setImportingJson] = useState(false);
   const [seedingSsc, setSeedingSsc] = useState(false);
+  const [adminExamFilter, setAdminExamFilter] = useState('ALL');
 
   // Inline Edit Tag state (admin can edit any existing tag's hierarchy, subExams[], & languages[])
   const [editingTagId, setEditingTagId] = useState(null);
@@ -309,10 +311,10 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
     try {
       const data = await apiRequest('/api/hashtags/bulk-import', {
         method: 'POST',
-        body: { useSscPreset: true },
+        body: { useAllPresets: true },
       });
       setSuccess(
-        `SSC Syllabus synced! Created ${data.createdCount} topics, updated ${data.updatedCount} topics (${data.totalProcessed} total).`
+        `All official syllabi (SSC, Kerala PSC, UPSC & RRB) synced! Created ${data.createdCount} topics, updated ${data.updatedCount} topics (${data.totalProcessed} total).`
       );
       await loadHashtags();
     } catch (err) {
@@ -895,7 +897,7 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
                 Taxonomy Bulk Tools
               </p>
               <p className="text-[11px] text-slate-500">
-                Seed the complete SSC syllabus or paste custom JSON
+                Seed SSC, Kerala PSC, UPSC &amp; RRB syllabi or paste custom JSON
               </p>
             </div>
             <div className="flex items-center gap-1.5">
@@ -910,13 +912,13 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
                 ) : (
                   <Sparkles className="h-3 w-3" />
                 )}
-                <span>{seedingSsc ? 'Seeding...' : 'Seed SSC Syllabus'}</span>
+                <span>{seedingSsc ? 'Seeding...' : 'Seed All Exams'}</span>
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setJsonImportText(
-                    JSON.stringify(SSC_TAXONOMY_JSON_PRESET, null, 2)
+                    JSON.stringify(UPSC_RRB_TAXONOMY_JSON_PRESET, null, 2)
                   );
                   setShowJsonImportModal(true);
                 }}
@@ -1202,8 +1204,43 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
               above to load the structured SSC taxonomy.
             </p>
           ) : (
-            <div className="flex flex-col gap-5">
-              {exams.map((exam) => (
+            <div className="flex flex-col gap-4">
+              {/* Quick Exam Filter Pills for Admin Topic Browsing */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setAdminExamFilter('ALL')}
+                  className={`rounded-full border px-3 py-1 text-[11px] font-bold transition active:scale-95 ${
+                    adminExamFilter === 'ALL'
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  All Exams ({exams.reduce((sum, ex) => sum + (groupedByExam[ex]?.length || 0), 0)})
+                </button>
+                {exams.map((ex) => {
+                  const active = adminExamFilter === ex;
+                  return (
+                    <button
+                      key={ex}
+                      type="button"
+                      onClick={() => setAdminExamFilter(ex)}
+                      className={`rounded-full border px-3 py-1 text-[11px] font-bold transition active:scale-95 ${
+                        active
+                          ? 'border-slate-900 bg-slate-900 text-white'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                      }`}
+                    >
+                      {ex} ({(groupedByExam[ex] || []).length})
+                    </button>
+                  );
+                })}
+              </div>
+
+              {(adminExamFilter === 'ALL'
+                ? exams
+                : exams.filter((ex) => ex === adminExamFilter)
+              ).map((exam) => (
                 <div key={exam} className="flex flex-col gap-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
@@ -1214,7 +1251,11 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
                         type="button"
                         onClick={() => {
                           setJsonImportText(
-                            JSON.stringify(SSC_TAXONOMY_JSON_PRESET, null, 2)
+                            JSON.stringify(
+                              UPSC_RRB_TAXONOMY_JSON_PRESET,
+                              null,
+                              2
+                            )
                           );
                           setShowJsonImportModal(true);
                         }}
@@ -1614,22 +1655,36 @@ export default function AdminHashtagsView({ onOpenCreatorProfile }) {
               </button>
             </div>
 
-            <div className="mb-2 flex items-center justify-between">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-1.5">
               <span className="text-[11px] font-bold text-slate-600">
-                JSON ArrayPayload
+                JSON Array Payload
               </span>
-              <button
-                type="button"
-                onClick={() =>
-                  setJsonImportText(
-                    JSON.stringify(SSC_TAXONOMY_JSON_PRESET, null, 2)
-                  )
-                }
-                className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-100"
-              >
-                <Sparkles className="h-3 w-3" />
-                <span>Load Official SSC Preset</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setJsonImportText(
+                      JSON.stringify(UPSC_RRB_TAXONOMY_JSON_PRESET, null, 2)
+                    )
+                  }
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold text-slate-700 hover:bg-slate-100"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  <span>UPSC + RRB</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setJsonImportText(
+                      JSON.stringify(ALL_OFFICIAL_TAXONOMY_JSON_PRESET, null, 2)
+                    )
+                  }
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-bold text-slate-700 hover:bg-slate-100"
+                >
+                  <Sparkles className="h-3 w-3" />
+                  <span>All Exams</span>
+                </button>
+              </div>
             </div>
 
             <textarea

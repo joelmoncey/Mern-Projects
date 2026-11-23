@@ -119,7 +119,11 @@ function AppShell() {
               onOpenAdmin={isAdmin ? () => handleChangeTab('admin') : null}
             />
           )}
-          {currentTab === 'admin' && isAdmin && <AdminHashtagsView />}
+          {currentTab === 'admin' && isAdmin && (
+            <AdminHashtagsView
+              onOpenCreatorProfile={handleOpenCreatorProfile}
+            />
+          )}
         </>
       )}
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   Award,
@@ -7,8 +7,10 @@ import {
   Flag,
   Flame,
   Heart,
+  Layers,
   Loader2,
   MessageCircle,
+  Play,
   Shield,
   Target,
   Trash2,
@@ -21,6 +23,31 @@ import { apiRequest } from '../lib/api.js';
 import { openAdminContactLink } from '../lib/telegram.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import EditQuizModal from '../components/EditQuizModal.jsx';
+import QuizCard from '../components/QuizCard.jsx';
+import { formatHierarchyPath } from './CreateQuizView.jsx';
+
+function getTopicKey(quiz) {
+  const tagId = quiz.hashtag?._id || quiz.hashtag?.tag || quiz.hashtag;
+  if (tagId) return String(tagId);
+  return `${quiz.examName || 'EXAM'}_${quiz.subjectName || 'SUBJECT'}`;
+}
+
+function getTopicMeta(quiz) {
+  const key = getTopicKey(quiz);
+  const tag =
+    quiz.hashtag?.tag ||
+    `${quiz.examName || 'EXAM'}_${quiz.subjectName || 'SUBJECT'}`.toUpperCase();
+  const hierarchy =
+    formatHierarchyPath(quiz) || `${quiz.examName} › ${quiz.subjectName}`;
+  const shortTitle =
+    quiz.subTopicName ||
+    quiz.hashtag?.subTopicName ||
+    quiz.subSubjectName ||
+    quiz.hashtag?.subSubjectName ||
+    quiz.subjectName ||
+    tag;
+  return { key, tag, hierarchy, shortTitle };
+}
 
 function ProfileQuizItem({
   quiz,
@@ -40,6 +67,8 @@ function ProfileQuizItem({
   const tagLabel =
     quiz.hashtag?.tag ||
     `${quiz.examName || 'EXAM'}_${quiz.subjectName || 'SUBJECT'}`.toUpperCase();
+  const hierarchyLabel =
+    formatHierarchyPath(quiz) || `${quiz.examName} › ${quiz.subjectName}`;
 
   async function handleSelectOption(idx) {
     if (isAnswered || submitting) return;
@@ -92,14 +121,14 @@ function ProfileQuizItem({
           : 'border-slate-200'
       }`}
     >
-      {/* Top Row: Tag + Flags + Owner/Admin Edit/Delete */}
+      {/* Top Row: Tag + Hierarchy + Owner/Admin Edit/Delete */}
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="rounded-full bg-slate-900 px-2.5 py-0.5 text-[10px] font-bold tracking-wider text-white uppercase">
             #{tagLabel}
           </span>
           <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
-            {quiz.examName} &bull; {quiz.subjectName}
+            {hierarchyLabel}
           </span>
           {quiz.needsCreatorEdit && (
             <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700 uppercase">
@@ -190,7 +219,11 @@ function ProfileQuizItem({
               </span>
               <span
                 className={`flex-1 ${
-                  isCorrectOption ? 'font-bold' : isWrongSelected ? 'font-semibold' : ''
+                  isCorrectOption
+                    ? 'font-bold'
+                    : isWrongSelected
+                      ? 'font-semibold'
+                      : ''
                 }`}
               >
                 {opt}
@@ -247,10 +280,14 @@ export default function ProfileView({
   const { user, isOfflinePreview, updateUserStats } = useAuth();
   const [profile, setProfile] = useState(null);
   const [quizzes, setQuizzes] = useState([]);
+  const [selectedTopicKey, setSelectedTopicKey] = useState('');
+  const [fullScreenScrollMode, setFullScreenScrollMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [editingQuiz, setEditingQuiz] = useState(null);
   const [followBusy, setFollowBusy] = useState(false);
+
+  const isAdmin = user?.role === 'admin';
 
   const loadProfile = useCallback(async () => {
     if (isOfflinePreview) {
@@ -261,6 +298,7 @@ export default function ProfileView({
         firstName: user?.firstName || 'Dev Aspirant',
         username: user?.username || 'dev_aspirant',
         role: user?.role || 'admin',
+        canCreateQuiz: true,
         totalSolved,
         correctSolved,
         accuracy: Math.round((correctSolved / totalSolved) * 100),
@@ -276,8 +314,14 @@ export default function ProfileView({
         {
           _id: 'preview-1',
           examName: 'UPSC',
+          subExamName: 'CSE Prelims',
           subjectName: 'History',
-          hashtag: { tag: 'UPSC_HISTORY' },
+          subSubjectName: 'Ancient India',
+          subTopicName: 'Indus Valley Civilization',
+          hashtag: {
+            _id: 'tag-upsc-hist',
+            tag: 'UPSC_CSE_HISTORY_ANCIENT_IVC',
+          },
           question:
             'Which Indus Valley Civilization site is famous for its tidal dockyard structure?',
           options: ['Harappa', 'Mohenjo-daro', 'Lothal', 'Kalibangan'],
@@ -311,6 +355,35 @@ export default function ProfileView({
   useEffect(() => {
     loadProfile();
   }, [loadProfile]);
+
+  // Build single-topic buckets (no "All Topics" mixing — users select one topic and scroll)
+  const topics = useMemo(() => {
+    const map = new Map();
+    for (const q of quizzes) {
+      const meta = getTopicMeta(q);
+      if (!map.has(meta.key)) {
+        map.set(meta.key, { ...meta, count: 0 });
+      }
+      map.get(meta.key).count += 1;
+    }
+    return Array.from(map.values());
+  }, [quizzes]);
+
+  useEffect(() => {
+    if (topics.length > 0 && !topics.some((t) => t.key === selectedTopicKey)) {
+      setSelectedTopicKey(topics[0].key);
+    }
+  }, [topics, selectedTopicKey]);
+
+  const activeTopic = useMemo(
+    () => topics.find((t) => t.key === selectedTopicKey) || topics[0] || null,
+    [topics, selectedTopicKey]
+  );
+
+  const selectedTopicQuizzes = useMemo(() => {
+    if (!activeTopic) return [];
+    return quizzes.filter((q) => getTopicKey(q) === activeTopic.key);
+  }, [quizzes, activeTopic]);
 
   function handleProfileQuizAttempted(userStats, quizId, nextAttemptsCount) {
     updateUserStats(userStats);
@@ -368,6 +441,19 @@ export default function ProfileView({
     }
   }
 
+  async function handleOpenEditQuiz(quiz) {
+    if (isOfflinePreview || typeof quiz.correctIndex === 'number') {
+      setEditingQuiz(quiz);
+      return;
+    }
+    try {
+      const data = await apiRequest(`/api/quizzes/${quiz._id}`);
+      setEditingQuiz(data.quiz);
+    } catch {
+      setEditingQuiz(quiz);
+    }
+  }
+
   async function handleDeleteQuiz(quizId) {
     if (isOfflinePreview) {
       setQuizzes((prev) => prev.filter((q) => q._id !== quizId));
@@ -391,6 +477,58 @@ export default function ProfileView({
     .charAt(0)
     .toUpperCase();
 
+  // Full-Screen Vertical Snap-Scroll Mode for the Selected Topic on Creator's Profile
+  if (fullScreenScrollMode && activeTopic) {
+    return (
+      <div className="relative h-dvh w-full bg-[#F8FAFC]">
+        <header className="fixed inset-x-0 top-0 z-30 mx-auto flex max-w-md items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-3 shadow-2xs backdrop-blur-md">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setFullScreenScrollMode(false)}
+              className="inline-flex shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white p-1.5 text-slate-700 shadow-2xs hover:bg-slate-50 active:scale-95"
+              aria-label="Back to creator profile"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+            <div className="min-w-0">
+              <p className="truncate text-xs font-bold text-slate-900">
+                @{profile?.username || profile?.firstName} &middot; #{activeTopic.tag}
+              </p>
+              <p className="truncate text-[10px] font-medium text-slate-500">
+                {activeTopic.hierarchy} ({selectedTopicQuizzes.length} quizzes)
+              </p>
+            </div>
+          </div>
+        </header>
+
+        <div className="quiz-feed-scroll">
+          {selectedTopicQuizzes.map((quiz) => (
+            <QuizCard
+              key={quiz._id}
+              quiz={quiz}
+              isOfflinePreview={isOfflinePreview}
+              canManage={Boolean(profile?.canManageQuizzes || isAdmin)}
+              onStatsUpdated={updateUserStats}
+              onEditQuiz={handleOpenEditQuiz}
+              onDeleteQuiz={handleDeleteQuiz}
+            />
+          ))}
+        </div>
+
+        {editingQuiz && (
+          <EditQuizModal
+            quiz={editingQuiz}
+            onClose={() => setEditingQuiz(null)}
+            onSaved={() => {
+              loadProfile();
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="h-dvh overflow-y-auto bg-[#F8FAFC] px-4 pt-5 pb-24">
       {/* Top Bar */}
@@ -411,7 +549,7 @@ export default function ProfileView({
               {profile?.isOwnProfile === false ? 'Creator Profile' : 'My Profile'}
             </h1>
             <p className="text-xs text-slate-500">
-              Performance stats &amp; published quizzes
+              Select a topic below to scroll quizzes
             </p>
           </div>
         </div>
@@ -426,7 +564,7 @@ export default function ProfileView({
             <span>Contact Admin</span>
           </button>
 
-          {user?.role === 'admin' && onOpenAdmin && (
+          {isAdmin && onOpenAdmin && (
             <button
               type="button"
               onClick={onOpenAdmin}
@@ -473,7 +611,7 @@ export default function ProfileView({
                       </span>
                     ) : profile.canCreateQuiz ? (
                       <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold tracking-wider text-emerald-700 uppercase">
-                        Creator
+                        Approved Creator
                       </span>
                     ) : null}
                   </div>
@@ -553,34 +691,82 @@ export default function ProfileView({
             </div>
           </div>
 
-          {/* Creator's Published Quizzes */}
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-xs font-bold tracking-wider text-slate-500 uppercase">
-              Published Quizzes ({quizzes.length})
-            </h3>
-            <span className="text-[11px] font-medium text-slate-400">
-              {profile.followingCount} following
-            </span>
-          </div>
-
+          {/* Single-Topic Selector + Scroll Section */}
           {quizzes.length === 0 ? (
             <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-xs text-slate-500 shadow-2xs">
               No quizzes published yet.
             </div>
           ) : (
-            <div className="flex flex-col gap-3">
-              {quizzes.map((quiz) => (
-                <ProfileQuizItem
-                  key={quiz._id}
-                  quiz={quiz}
-                  canManage={Boolean(profile.canManageQuizzes)}
-                  isOfflinePreview={isOfflinePreview}
-                  onEdit={setEditingQuiz}
-                  onDelete={handleDeleteQuiz}
-                  onStatsUpdated={handleProfileQuizAttempted}
-                />
-              ))}
-            </div>
+            <>
+              <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-2xs">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-slate-500 uppercase">
+                    <Layers className="h-3.5 w-3.5 text-slate-700" />
+                    Select One Topic ({topics.length})
+                  </span>
+                  {selectedTopicQuizzes.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setFullScreenScrollMode(true)}
+                      className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-3 py-1 text-[11px] font-bold text-white shadow-2xs hover:bg-slate-800 active:scale-95"
+                    >
+                      <Play className="h-3 w-3 fill-white" />
+                      <span>Scroll Topic Feed ({selectedTopicQuizzes.length})</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Topic Selector Chips (strictly single-select, no "All" mixing) */}
+                <div className="flex flex-wrap gap-1.5">
+                  {topics.map((topic) => {
+                    const active = activeTopic?.key === topic.key;
+                    return (
+                      <button
+                        key={topic.key}
+                        type="button"
+                        onClick={() => setSelectedTopicKey(topic.key)}
+                        className={`rounded-xl border px-3 py-1.5 text-left text-xs font-bold transition active:scale-95 ${
+                          active
+                            ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
+                            : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300 hover:bg-white'
+                        }`}
+                      >
+                        <span>#{topic.tag}</span>
+                        <span
+                          className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] ${
+                            active
+                              ? 'bg-white/20 text-white'
+                              : 'bg-slate-200/80 text-slate-600'
+                          }`}
+                        >
+                          {topic.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {activeTopic && (
+                  <p className="mt-2 truncate text-[11px] font-medium text-slate-500">
+                    Topic Path: <span className="font-semibold text-slate-800">{activeTopic.hierarchy}</span>
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-3">
+                {selectedTopicQuizzes.map((quiz) => (
+                  <ProfileQuizItem
+                    key={quiz._id}
+                    quiz={quiz}
+                    canManage={Boolean(profile.canManageQuizzes || isAdmin)}
+                    isOfflinePreview={isOfflinePreview}
+                    onEdit={handleOpenEditQuiz}
+                    onDelete={handleDeleteQuiz}
+                    onStatsUpdated={handleProfileQuizAttempted}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </>
       )}

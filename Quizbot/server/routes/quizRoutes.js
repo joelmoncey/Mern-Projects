@@ -5,6 +5,7 @@ import {
   getMyQuizzes,
   getQuizById,
   getEscalatedQuizzes,
+  getAllQuizzesForAdmin,
   flagQuiz,
   updateQuiz,
   deleteQuiz,
@@ -21,6 +22,7 @@ const router = Router();
 router.get('/feed', optionalAuth, getQuizFeed);
 router.get('/mine', protect, getMyQuizzes);
 router.get('/escalations', protect, adminOnly, getEscalatedQuizzes);
+router.get('/admin/all', protect, adminOnly, getAllQuizzesForAdmin);
 router.get('/:id', protect, getQuizById);
 router.post('/', protect, quizWriteLimiter, createQuiz);
 router.patch('/:id', protect, quizWriteLimiter, updateQuiz);

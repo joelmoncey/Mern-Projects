@@ -39,7 +39,10 @@ function buildProfileResponse({ targetUser, viewerUser, quizzes }) {
       },
       hashtag: q.hashtag,
       examName: q.examName,
+      subExamName: q.subExamName || q.hashtag?.subExamName || '',
       subjectName: q.subjectName,
+      subSubjectName: q.subSubjectName || q.hashtag?.subSubjectName || '',
+      subTopicName: q.subTopicName || q.hashtag?.subTopicName || '',
       question: q.question,
       options: q.options,
       likesCount: likes.length,
@@ -91,7 +94,10 @@ export async function getMyProfile(req, res, next) {
   try {
     const quizzes = await Quiz.find({ creator: req.user._id })
       .sort({ needsCreatorEdit: -1, createdAt: -1 })
-      .populate('hashtag', 'examName subjectName tag syllabusScope')
+      .populate(
+        'hashtag',
+        'examName subExamName subjectName subSubjectName subTopicName tag syllabusScope'
+      )
       .lean();
 
     return res.status(200).json(
@@ -129,7 +135,10 @@ export async function getUserProfile(req, res, next) {
 
     const quizzes = await Quiz.find(quizFilter)
       .sort({ createdAt: -1 })
-      .populate('hashtag', 'examName subjectName tag syllabusScope')
+      .populate(
+        'hashtag',
+        'examName subExamName subjectName subSubjectName subTopicName tag syllabusScope'
+      )
       .lean();
 
     return res.status(200).json(

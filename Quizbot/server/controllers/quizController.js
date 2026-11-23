@@ -146,7 +146,10 @@ export async function createQuiz(req, res, next) {
       creator: req.user._id,
       hashtag: hashtagDoc._id,
       examName: hashtagDoc.examName,
+      subExamName: hashtagDoc.subExamName || '',
       subjectName: hashtagDoc.subjectName,
+      subSubjectName: hashtagDoc.subSubjectName || '',
+      subTopicName: hashtagDoc.subTopicName || '',
       question: validated.question,
       normalizedQuestion: validated.normalizedQuestion,
       questionHash: validated.questionHash,
@@ -165,7 +168,11 @@ export async function createQuiz(req, res, next) {
 
     await quiz.populate([
       { path: 'creator', select: 'firstName username photoUrl' },
-      { path: 'hashtag', select: 'examName subjectName tag syllabusScope isActive' },
+      {
+        path: 'hashtag',
+        select:
+          'examName subExamName subjectName subSubjectName subTopicName tag syllabusScope isActive',
+      },
     ]);
 
     return res.status(201).json({ quiz });
@@ -201,7 +208,10 @@ export async function getQuizFeed(req, res, next) {
         isHidden: false,
       })
         .populate('creator', 'firstName username photoUrl')
-        .populate('hashtag', 'examName subjectName tag syllabusScope isActive')
+        .populate(
+          'hashtag',
+          'examName subExamName subjectName subSubjectName subTopicName tag syllabusScope isActive'
+        )
         .lean();
     }
 
@@ -277,6 +287,7 @@ export async function getQuizFeed(req, res, next) {
       : balanced.slice(0, remainingSlots);
 
     const currentUserId = req.user ? String(req.user._id) : null;
+    const isAdminViewer = req.user?.role === 'admin';
     const followingSet = new Set(
       (req.user?.following || []).map((id) => String(id))
     );
@@ -285,13 +296,17 @@ export async function getQuizFeed(req, res, next) {
       const likes = Array.isArray(q.likes) ? q.likes : [];
       const flags = Array.isArray(q.flags) ? q.flags : [];
       const creatorId = q.creator?._id ? String(q.creator._id) : String(q.creator);
+      const isOwnQuiz = currentUserId ? creatorId === currentUserId : false;
 
       return {
         _id: q._id,
         creator: q.creator,
         hashtag: q.hashtag,
         examName: q.examName,
+        subExamName: q.subExamName || q.hashtag?.subExamName || '',
         subjectName: q.subjectName,
+        subSubjectName: q.subSubjectName || q.hashtag?.subSubjectName || '',
+        subTopicName: q.subTopicName || q.hashtag?.subTopicName || '',
         question: q.question,
         questionHash: q.questionHash,
         options: q.options,
@@ -307,7 +322,14 @@ export async function getQuizFeed(req, res, next) {
         editCount: q.editCount || 0,
         lastEditedAt: q.lastEditedAt || null,
         isFollowingCreator: currentUserId ? followingSet.has(creatorId) : false,
-        isOwnQuiz: currentUserId ? creatorId === currentUserId : false,
+        isOwnQuiz,
+        canManage: isAdminViewer || isOwnQuiz,
+        ...(isAdminViewer || isOwnQuiz
+          ? {
+              correctIndex: q.correctIndex,
+              explanation: q.explanation,
+            }
+          : {}),
         attemptsCount: q.attemptsCount || 0,
         correctCount: q.correctCount || 0,
         createdAt: q.createdAt,
@@ -378,7 +400,43 @@ export async function getEscalatedQuizzes(req, res, next) {
     })
       .sort({ escalatedToAdmin: -1, escalatedAt: -1, flagCount: -1 })
       .populate('creator', 'firstName username photoUrl')
-      .populate('hashtag', 'examName subjectName tag syllabusScope')
+      .populate(
+        'hashtag',
+        'examName subExamName subjectName subSubjectName subTopicName tag syllabusScope'
+      )
+      .lean();
+
+    return res.status(200).json({ quizzes });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getAllQuizzesForAdmin(req, res, next) {
+  try {
+    const q = String(req.query.q || '').trim();
+    const filter = {};
+    if (q) {
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+      filter.$or = [
+        { question: regex },
+        { examName: regex },
+        { subExamName: regex },
+        { subjectName: regex },
+        { subSubjectName: regex },
+        { subTopicName: regex },
+      ];
+    }
+
+    const quizzes = await Quiz.find(filter)
+      .sort({ createdAt: -1 })
+      .limit(80)
+      .populate('creator', 'firstName username photoUrl telegramId')
+      .populate(
+        'hashtag',
+        'examName subExamName subjectName subSubjectName subTopicName tag syllabusScope'
+      )
       .lean();
 
     return res.status(200).json({ quizzes });

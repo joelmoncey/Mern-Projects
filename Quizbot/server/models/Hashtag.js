@@ -9,10 +9,25 @@ const hashtagSchema = new Schema(
       required: true,
       trim: true,
     },
+    subExamName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     subjectName: {
       type: String,
       required: true,
       trim: true,
+    },
+    subSubjectName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    subTopicName: {
+      type: String,
+      trim: true,
+      default: '',
     },
     tag: {
       type: String,
@@ -45,7 +60,13 @@ const hashtagSchema = new Schema(
   }
 );
 
-hashtagSchema.index({ examName: 1, subjectName: 1 });
+hashtagSchema.index({
+  examName: 1,
+  subExamName: 1,
+  subjectName: 1,
+  subSubjectName: 1,
+  subTopicName: 1,
+});
 
 const Hashtag = mongoose.model('Hashtag', hashtagSchema);
 

@@ -9,6 +9,25 @@ import {
 
 const HASHTAGS_TTL_SECONDS = 300; // 5 minutes
 
+function buildDefaultTag({
+  examName,
+  subExamName,
+  subjectName,
+  subSubjectName,
+  subTopicName,
+}) {
+  return [examName, subExamName, subjectName, subSubjectName, subTopicName]
+    .map((part) =>
+      String(part || '')
+        .trim()
+        .replace(/[^a-zA-Z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toUpperCase()
+    )
+    .filter(Boolean)
+    .join('_');
+}
+
 export async function getHashtags(req, res, next) {
   try {
     const includeInactive =
@@ -26,7 +45,13 @@ export async function getHashtags(req, res, next) {
     const filter = includeInactive ? {} : { isActive: true };
 
     const hashtags = await Hashtag.find(filter)
-      .sort({ examName: 1, subjectName: 1 })
+      .sort({
+        examName: 1,
+        subExamName: 1,
+        subjectName: 1,
+        subSubjectName: 1,
+        subTopicName: 1,
+      })
       .lean();
 
     const groupedByExam = {};
@@ -55,15 +80,38 @@ export async function getHashtags(req, res, next) {
 
 export async function createHashtag(req, res, next) {
   try {
-    const { examName, subjectName, tag, syllabusScope = '' } = req.body || {};
+    const {
+      examName,
+      subExamName = '',
+      subjectName,
+      subSubjectName = '',
+      subTopicName = '',
+      tag,
+      syllabusScope = '',
+    } = req.body || {};
 
-    if (!examName?.trim() || !subjectName?.trim() || !tag?.trim()) {
+    if (!examName?.trim() || !subjectName?.trim()) {
       return res.status(400).json({
-        error: 'examName, subjectName, and tag are required',
+        error: 'Exam and Subject are required',
       });
     }
 
-    const normalizedTag = tag.trim().replace(/^#+/, '').toUpperCase();
+    const autoTag = buildDefaultTag({
+      examName,
+      subExamName,
+      subjectName,
+      subSubjectName,
+      subTopicName,
+    });
+
+    const normalizedTag = (tag?.trim() ? tag.trim() : autoTag)
+      .replace(/^#+/, '')
+      .replace(/[^a-zA-Z0-9_]+/g, '_')
+      .toUpperCase();
+
+    if (!normalizedTag) {
+      return res.status(400).json({ error: 'A valid tag code is required' });
+    }
 
     const existing = await Hashtag.findOne({ tag: normalizedTag });
     if (existing) {
@@ -74,7 +122,10 @@ export async function createHashtag(req, res, next) {
 
     const hashtag = await Hashtag.create({
       examName: examName.trim(),
+      subExamName: String(subExamName || '').trim(),
       subjectName: subjectName.trim(),
+      subSubjectName: String(subSubjectName || '').trim(),
+      subTopicName: String(subTopicName || '').trim(),
       tag: normalizedTag,
       syllabusScope: String(syllabusScope || '').trim(),
       isActive: true,
@@ -103,7 +154,15 @@ export async function updateHashtag(req, res, next) {
       return res.status(404).json({ error: 'Hashtag not found' });
     }
 
-    const { isActive, syllabusScope, examName, subjectName } = req.body || {};
+    const {
+      isActive,
+      syllabusScope,
+      examName,
+      subExamName,
+      subjectName,
+      subSubjectName,
+      subTopicName,
+    } = req.body || {};
 
     if (typeof isActive === 'boolean') {
       hashtag.isActive = isActive;
@@ -111,7 +170,10 @@ export async function updateHashtag(req, res, next) {
       isActive === undefined &&
       syllabusScope === undefined &&
       examName === undefined &&
-      subjectName === undefined
+      subExamName === undefined &&
+      subjectName === undefined &&
+      subSubjectName === undefined &&
+      subTopicName === undefined
     ) {
       hashtag.isActive = !hashtag.isActive;
     }
@@ -122,8 +184,17 @@ export async function updateHashtag(req, res, next) {
     if (typeof examName === 'string' && examName.trim()) {
       hashtag.examName = examName.trim();
     }
+    if (typeof subExamName === 'string') {
+      hashtag.subExamName = subExamName.trim();
+    }
     if (typeof subjectName === 'string' && subjectName.trim()) {
       hashtag.subjectName = subjectName.trim();
+    }
+    if (typeof subSubjectName === 'string') {
+      hashtag.subSubjectName = subSubjectName.trim();
+    }
+    if (typeof subTopicName === 'string') {
+      hashtag.subTopicName = subTopicName.trim();
     }
 
     await hashtag.save();

@@ -4,19 +4,26 @@ import { apiRequest } from '../lib/api.js';
 import { getDeepLinkedQuizId } from '../lib/telegram.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import QuizCard from '../components/QuizCard.jsx';
+import EditQuizModal from '../components/EditQuizModal.jsx';
 
 const OFFLINE_SAMPLE_QUIZZES = [
   {
     _id: 'preview-1',
     examName: 'UPSC',
+    subExamName: 'CSE Prelims',
     subjectName: 'History',
+    subSubjectName: 'Ancient India',
+    subTopicName: 'Indus Valley Civilization',
     hashtag: {
       _id: 'tag-upsc-hist',
-      tag: 'UPSC_HISTORY',
+      tag: 'UPSC_CSE_HISTORY_ANCIENT_IVC',
       examName: 'UPSC',
+      subExamName: 'CSE Prelims',
       subjectName: 'History',
+      subSubjectName: 'Ancient India',
+      subTopicName: 'Indus Valley Civilization',
       syllabusScope:
-        'Indus Valley Civilization, Vedic Age, Mauryan & Gupta Empires, Modern Indian Freedom Struggle.',
+        'Indus Valley Civilization, Vedic Age, Mauryan & Gupta Empires.',
     },
     creator: { _id: 'c1', firstName: 'Aarav', username: 'civil_prep' },
     question:
@@ -33,19 +40,24 @@ const OFFLINE_SAMPLE_QUIZZES = [
   },
   {
     _id: 'preview-2',
-    examName: 'SSC CGL',
+    examName: 'SSC',
+    subExamName: 'CGL Tier 1',
     subjectName: 'English',
+    subSubjectName: 'Vocabulary',
+    subTopicName: 'Synonyms',
     hashtag: {
       _id: 'tag-ssc-eng',
-      tag: 'SSC_ENGLISH',
-      examName: 'SSC CGL',
+      tag: 'SSC_CGL_ENGLISH_VOCAB_SYNONYMS',
+      examName: 'SSC',
+      subExamName: 'CGL Tier 1',
       subjectName: 'English',
+      subSubjectName: 'Vocabulary',
+      subTopicName: 'Synonyms',
       syllabusScope:
-        'Reading Comprehension, Idioms & Phrases, One-Word Substitution, Error Spotting, Synonyms & Antonyms.',
+        'Reading Comprehension, Idioms & Phrases, Synonyms & Antonyms.',
     },
     creator: { _id: 'c2', firstName: 'Meera', username: 'ssc_daily' },
-    question:
-      'Choose the most appropriate synonym of the word "EPHEMERAL":',
+    question: 'Choose the most appropriate synonym of the word "EPHEMERAL":',
     options: ['Permanent', 'Short-lived', 'Abundant', 'Obscure'],
     _previewCorrectIndex: 1,
     _previewExplanation:
@@ -61,7 +73,9 @@ const OFFLINE_SAMPLE_QUIZZES = [
 export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
   const { user, isOfflinePreview, updateUserStats } = useAuth();
   const [exams, setExams] = useState([]);
-  const [selectedExam, setSelectedExam] = useState('ALL');
+  // No 'ALL' tab — defaults strictly to a single exam so questions never get mixed
+  const [selectedExam, setSelectedExam] = useState('');
+  const [examsLoaded, setExamsLoaded] = useState(false);
   const [feedTab, setFeedTab] = useState('forYou');
   const [quizzes, setQuizzes] = useState([]);
   const [seenHashes, setSeenHashes] = useState([]);
@@ -69,24 +83,42 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [editingQuiz, setEditingQuiz] = useState(null);
 
   const sentinelRef = useRef(null);
   const initialDeepLinkRef = useRef(getDeepLinkedQuizId());
 
+  const isAdmin = user?.role === 'admin';
+
   useEffect(() => {
     if (isOfflinePreview) {
-      setExams(['UPSC', 'SSC CGL']);
+      const demoExams = ['UPSC', 'SSC'];
+      setExams(demoExams);
+      setSelectedExam((prev) =>
+        prev && demoExams.includes(prev) ? prev : demoExams[0]
+      );
+      setExamsLoaded(true);
       return;
     }
 
     let cancelled = false;
     apiRequest('/api/hashtags')
       .then((data) => {
-        if (!cancelled) {
-          setExams(data.exams || []);
+        if (cancelled) return;
+        const examList = data.exams || [];
+        setExams(examList);
+        if (examList.length > 0) {
+          setSelectedExam((prev) =>
+            prev && examList.includes(prev) ? prev : examList[0]
+          );
+        } else {
+          setSelectedExam('');
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setExamsLoaded(true);
+      });
 
     return () => {
       cancelled = true;
@@ -95,12 +127,21 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
 
   const fetchBatch = useCallback(
     async ({ reset = false, currentSeen = [] } = {}) => {
+      if (!examsLoaded) return;
+
       if (isOfflinePreview) {
-        const filtered =
-          selectedExam === 'ALL'
-            ? OFFLINE_SAMPLE_QUIZZES
-            : OFFLINE_SAMPLE_QUIZZES.filter((q) => q.examName === selectedExam);
+        const filtered = selectedExam
+          ? OFFLINE_SAMPLE_QUIZZES.filter((q) => q.examName === selectedExam)
+          : OFFLINE_SAMPLE_QUIZZES;
         setQuizzes(filtered);
+        setHasMore(false);
+        setLoading(false);
+        setLoadingMore(false);
+        return;
+      }
+
+      if (!selectedExam && exams.length === 0) {
+        setQuizzes([]);
         setHasMore(false);
         setLoading(false);
         setLoadingMore(false);
@@ -118,7 +159,7 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
         const params = new URLSearchParams();
         params.set('limit', '12');
         params.set('tab', feedTab);
-        if (selectedExam !== 'ALL') {
+        if (selectedExam) {
           params.set('examName', selectedExam);
         }
         if (reset && initialDeepLinkRef.current) {
@@ -143,13 +184,14 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
         setLoadingMore(false);
       }
     },
-    [selectedExam, feedTab, isOfflinePreview]
+    [examsLoaded, selectedExam, exams.length, feedTab, isOfflinePreview]
   );
 
   useEffect(() => {
+    if (!examsLoaded) return;
     setSeenHashes([]);
     fetchBatch({ reset: true, currentSeen: [] });
-  }, [fetchBatch]);
+  }, [examsLoaded, fetchBatch]);
 
   useEffect(() => {
     const node = sentinelRef.current;
@@ -177,6 +219,26 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
           : q;
       })
     );
+  }
+
+  async function handleOpenEditQuiz(quiz) {
+    if (isOfflinePreview) {
+      setEditingQuiz(quiz);
+      return;
+    }
+    try {
+      const data = await apiRequest(`/api/quizzes/${quiz._id}`);
+      setEditingQuiz(data.quiz);
+    } catch {
+      setEditingQuiz(quiz);
+    }
+  }
+
+  async function handleDeleteQuiz(quizId) {
+    if (!isOfflinePreview) {
+      await apiRequest(`/api/quizzes/${quizId}`, { method: 'DELETE' });
+    }
+    setQuizzes((prev) => prev.filter((q) => q._id !== quizId));
   }
 
   return (
@@ -230,26 +292,28 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
           </div>
         </div>
 
-        {/* Modern Exam Selector Pills */}
-        <div className="mt-2.5 flex gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {['ALL', ...exams].map((exam) => {
-            const active = selectedExam === exam;
-            return (
-              <button
-                key={exam}
-                type="button"
-                onClick={() => setSelectedExam(exam)}
-                className={`shrink-0 rounded-full border px-3.5 py-1 text-[11px] font-bold tracking-wide uppercase transition active:scale-95 ${
-                  active
-                    ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900'
-                }`}
-              >
-                {exam === 'ALL' ? 'All Exams' : exam}
-              </button>
-            );
-          })}
-        </div>
+        {/* Single-Exam Selector Pills (No "All Exams" mixing) */}
+        {exams.length > 0 && (
+          <div className="mt-2.5 flex gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {exams.map((exam) => {
+              const active = selectedExam === exam;
+              return (
+                <button
+                  key={exam}
+                  type="button"
+                  onClick={() => setSelectedExam(exam)}
+                  className={`shrink-0 rounded-full border px-3.5 py-1 text-[11px] font-bold tracking-wide uppercase transition active:scale-95 ${
+                    active
+                      ? 'border-slate-900 bg-slate-900 text-white shadow-2xs'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900'
+                  }`}
+                >
+                  {exam}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </header>
 
       {/* Feed Body */}
@@ -274,13 +338,15 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
         <div className="flex h-dvh flex-col items-center justify-center gap-3 px-8 text-center">
           <p className="text-base font-bold text-slate-900">
             {feedTab === 'following'
-              ? 'No quizzes from creators you follow yet'
-              : 'No quizzes found for this filter'}
+              ? 'No quizzes from creators you follow in this exam yet'
+              : selectedExam
+                ? `No quizzes in ${selectedExam} yet`
+                : 'No quizzes published yet'}
           </p>
           <p className="text-xs text-slate-500">
             {feedTab === 'following'
               ? 'Switch to For You and follow creators whose questions help your prep.'
-              : 'Be the first to publish a syllabus-aligned question.'}
+              : 'Be the first to publish a syllabus-aligned question for this exam.'}
           </p>
           <button
             type="button"
@@ -301,9 +367,12 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
               key={quiz._id}
               quiz={quiz}
               isOfflinePreview={isOfflinePreview}
+              canManage={isAdmin || Boolean(quiz.canManage)}
               onStatsUpdated={updateUserStats}
               onFollowChanged={handleFollowChanged}
               onOpenCreatorProfile={onOpenCreatorProfile}
+              onEditQuiz={handleOpenEditQuiz}
+              onDeleteQuiz={handleDeleteQuiz}
             />
           ))}
 
@@ -331,6 +400,20 @@ export default function FeedView({ onOpenCreate, onOpenCreatorProfile }) {
             )}
           </div>
         </div>
+      )}
+
+      {editingQuiz && (
+        <EditQuizModal
+          quiz={editingQuiz}
+          onClose={() => setEditingQuiz(null)}
+          onSaved={(updatedQuiz) => {
+            setQuizzes((prev) =>
+              prev.map((q) =>
+                q._id === updatedQuiz._id ? { ...q, ...updatedQuiz } : q
+              )
+            );
+          }}
+        />
       )}
     </div>
   );

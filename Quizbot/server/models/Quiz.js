@@ -43,10 +43,25 @@ const quizSchema = new Schema(
       required: true,
       trim: true,
     },
+    subExamName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     subjectName: {
       type: String,
       required: true,
       trim: true,
+    },
+    subSubjectName: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    subTopicName: {
+      type: String,
+      trim: true,
+      default: '',
     },
     question: {
       type: String,

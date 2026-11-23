@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertCircle, Flag, Loader2, Save, X } from 'lucide-react';
+import { AlertCircle, Check, Flag, Loader2, Save, X } from 'lucide-react';
 import { apiRequest } from '../lib/api.js';
 
 export default function EditQuizModal({ quiz, onClose, onSaved }) {
@@ -42,7 +42,7 @@ export default function EditQuizModal({ quiz, onClose, onSaved }) {
         body: {
           question: question.trim(),
           options: options.map((opt) => opt.trim()),
-          correctIndex,
+          correctIndex: Number(correctIndex),
           explanation: explanation.trim(),
         },
       });
@@ -130,12 +130,18 @@ export default function EditQuizModal({ quiz, onClose, onSaved }) {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs font-bold text-slate-700">
-              Options (tap letter to mark right answer)
-            </label>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-700">
+                Options &amp; Right Answer
+              </label>
+              <span className="text-[11px] font-bold text-emerald-700">
+                ✓ Right: Option {String.fromCharCode(65 + correctIndex)}
+              </span>
+            </div>
             <div className="flex flex-col gap-2">
               {options.map((opt, idx) => {
                 const isCorrect = correctIndex === idx;
+                const letter = String.fromCharCode(65 + idx);
                 return (
                   <div key={idx} className="flex items-center gap-2">
                     <button
@@ -147,7 +153,7 @@ export default function EditQuizModal({ quiz, onClose, onSaved }) {
                           : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
                       }`}
                     >
-                      {String.fromCharCode(65 + idx)}
+                      {letter}
                     </button>
                     <input
                       type="text"
@@ -156,11 +162,50 @@ export default function EditQuizModal({ quiz, onClose, onSaved }) {
                       onChange={(e) => handleOptionChange(idx, e.target.value)}
                       className={`flex-1 rounded-xl border bg-white px-3.5 py-2 text-sm text-slate-900 outline-none ${
                         isCorrect
-                          ? 'border-emerald-500 bg-emerald-50/30'
+                          ? 'border-emerald-500 bg-emerald-50/30 font-semibold'
                           : 'border-slate-200 focus:border-slate-900'
                       }`}
                     />
+                    <button
+                      type="button"
+                      onClick={() => setCorrectIndex(idx)}
+                      className={`inline-flex shrink-0 items-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-bold transition active:scale-95 ${
+                        isCorrect
+                          ? 'border-emerald-600 bg-emerald-600 text-white'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
+                      }`}
+                    >
+                      {isCorrect ? (
+                        <>
+                          <Check className="h-3 w-3 stroke-[3]" />
+                          <span>Right</span>
+                        </>
+                      ) : (
+                        <span>Set Right</span>
+                      )}
+                    </button>
                   </div>
+                );
+              })}
+            </div>
+
+            <div className="mt-2 grid grid-cols-4 gap-1.5">
+              {[0, 1, 2, 3].map((idx) => {
+                const letter = String.fromCharCode(65 + idx);
+                const active = correctIndex === idx;
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setCorrectIndex(idx)}
+                    className={`rounded-lg border py-1.5 text-xs font-bold transition active:scale-95 ${
+                      active
+                        ? 'border-emerald-600 bg-emerald-600 text-white'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    {active ? `✓ Option ${letter}` : `Option ${letter}`}
+                  </button>
                 );
               })}
             </div>

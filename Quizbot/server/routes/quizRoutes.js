@@ -21,6 +21,7 @@ import { quizWriteLimiter, actionLimiter } from '../middleware/rateLimiter.js';
 const router = Router();
 
 router.get('/feed', optionalAuth, getQuizFeed);
+router.post('/feed', optionalAuth, getQuizFeed);
 router.get('/mine', protect, getMyQuizzes);
 router.get('/escalations', protect, adminOnly, getEscalatedQuizzes);
 router.get('/admin/all', protect, adminOnly, getAllQuizzesForAdmin);

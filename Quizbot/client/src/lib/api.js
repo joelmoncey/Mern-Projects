@@ -28,7 +28,12 @@ export function getAuthToken() {
 function isRetryableRequest(method, path) {
   const upper = String(method || 'GET').toUpperCase();
   if (upper === 'GET' || upper === 'HEAD') return true;
-  if (upper === 'POST' && path.startsWith('/api/auth/')) return true;
+  if (
+    upper === 'POST' &&
+    (path.startsWith('/api/auth/') || path.startsWith('/api/quizzes/feed'))
+  ) {
+    return true;
+  }
   return false;
 }
 

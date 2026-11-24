@@ -290,49 +290,82 @@ export default function FeedView({
       }
 
       try {
-        const params = new URLSearchParams();
-        params.set('limit', '12');
-        params.set('tab', feedTab);
-        if (activeExam) {
-          params.set('examName', activeExam);
-        }
         const activeSubExams =
           Array.isArray(examFilter?.subExams) && examFilter.subExams.length > 0
             ? examFilter.subExams.join(',')
             : examFilter?.subExamName || '';
-        if (activeSubExams) {
-          params.set('subExams', activeSubExams);
-          params.set('subExamName', activeSubExams);
-        }
-        if (activeLanguage) {
-          params.set('language', activeLanguage);
-        }
-        if (activeSubject) {
-          params.set('subjectName', activeSubject);
-        }
-        if (examFilter?.subSubjectName) {
-          params.set('subSubjectName', examFilter.subSubjectName);
-        }
-        if (examFilter?.subTopicName) {
-          params.set('subTopicName', examFilter.subTopicName);
-        }
-        if (examFilter?.hashtagId) {
-          params.set('hashtag', examFilter.hashtagId);
-        }
+
+        let deepLinkId = '';
         if (reset && initialDeepLinkRef.current) {
-          params.set('prioritizeQuizId', initialDeepLinkRef.current);
+          deepLinkId = initialDeepLinkRef.current;
           initialDeepLinkRef.current = null;
         }
-        // Always include today's daily seen hashes so zero questions repeat in the same day's scroll
+
+        // Always include today's daily seen hashes in JSON body (avoids Nginx 8KB GET URL limit -> 414 Failed to fetch!)
         const dailySeen = loadTodaySeenHashes();
         const combinedSeen = Array.from(
           new Set([...dailySeen, ...(currentSeen || [])])
-        ).slice(-250);
-        if (combinedSeen.length > 0) {
-          params.set('seenHashes', combinedSeen.join(','));
-        }
+        ).slice(-500);
 
-        const data = await apiRequest(`/api/quizzes/feed?${params.toString()}`);
+        const feedBody = {
+          limit: 12,
+          tab: feedTab,
+          ...(activeExam ? { examName: activeExam } : {}),
+          ...(activeSubExams
+            ? { subExams: activeSubExams, subExamName: activeSubExams }
+            : {}),
+          ...(activeLanguage ? { language: activeLanguage } : {}),
+          ...(activeSubject ? { subjectName: activeSubject } : {}),
+          ...(examFilter?.subSubjectName
+            ? { subSubjectName: examFilter.subSubjectName }
+            : {}),
+          ...(examFilter?.subTopicName
+            ? { subTopicName: examFilter.subTopicName }
+            : {}),
+          ...(examFilter?.hashtagId ? { hashtag: examFilter.hashtagId } : {}),
+          ...(deepLinkId ? { prioritizeQuizId: deepLinkId } : {}),
+          ...(combinedSeen.length > 0 ? { seenHashes: combinedSeen } : {}),
+        };
+
+        let data;
+        try {
+          data = await apiRequest('/api/quizzes/feed', {
+            method: 'POST',
+            body: feedBody,
+          });
+        } catch (postErr) {
+          // Graceful fallback to short-URL GET if an older server doesn't have POST /feed yet
+          if (postErr?.status === 404) {
+            const params = new URLSearchParams();
+            params.set('limit', '12');
+            params.set('tab', feedTab);
+            if (activeExam) params.set('examName', activeExam);
+            if (activeSubExams) {
+              params.set('subExams', activeSubExams);
+              params.set('subExamName', activeSubExams);
+            }
+            if (activeLanguage) params.set('language', activeLanguage);
+            if (activeSubject) params.set('subjectName', activeSubject);
+            if (examFilter?.subSubjectName) {
+              params.set('subSubjectName', examFilter.subSubjectName);
+            }
+            if (examFilter?.subTopicName) {
+              params.set('subTopicName', examFilter.subTopicName);
+            }
+            if (examFilter?.hashtagId) {
+              params.set('hashtag', examFilter.hashtagId);
+            }
+            if (deepLinkId) params.set('prioritizeQuizId', deepLinkId);
+            // Cap GET query string strictly under 3KB so Nginx never returns 414
+            const safeGetSeen = combinedSeen.slice(-35);
+            if (safeGetSeen.length > 0) {
+              params.set('seenHashes', safeGetSeen.join(','));
+            }
+            data = await apiRequest(`/api/quizzes/feed?${params.toString()}`);
+          } else {
+            throw postErr;
+          }
+        }
 
         setQuizzes((prev) =>
           reset ? data.quizzes || [] : [...prev, ...(data.quizzes || [])]

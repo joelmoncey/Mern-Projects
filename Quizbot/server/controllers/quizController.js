@@ -408,6 +408,10 @@ export async function createBulkQuizzes(req, res, next) {
 
 export async function getQuizFeed(req, res, next) {
   try {
+    const source = {
+      ...(req.query || {}),
+      ...(req.body && typeof req.body === 'object' ? req.body : {}),
+    };
     const {
       examName,
       subExamName,
@@ -421,7 +425,7 @@ export async function getQuizFeed(req, res, next) {
       seenHashes,
       prioritizeQuizId,
       limit = '12',
-    } = req.query;
+    } = source;
 
     const parsedLimit = Math.min(Math.max(parseInt(limit, 10) || 12, 1), 30);
     const seenList = parseSeenHashes(seenHashes);

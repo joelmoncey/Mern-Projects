@@ -4,12 +4,12 @@ import {
   createStarsInvoice,
   getStarsPaymentStatus,
 } from '../controllers/paymentController.js';
-import { optionalAuth, requireAuth } from '../middleware/auth.js';
+import { optionalAuth, protect } from '../middleware/auth.js';
 
 const router = Router();
 
 router.get('/chai/summary', optionalAuth, getChaiSummary);
-router.post('/stars/invoice', requireAuth, createStarsInvoice);
-router.get('/stars/status/:payloadId', requireAuth, getStarsPaymentStatus);
+router.post('/stars/invoice', protect, createStarsInvoice);
+router.get('/stars/status/:payloadId', protect, getStarsPaymentStatus);
 
 export default router;

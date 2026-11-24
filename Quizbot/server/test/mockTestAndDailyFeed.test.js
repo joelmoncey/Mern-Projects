@@ -6,6 +6,7 @@ import {
   scoreMockSubmission,
   validateMockQuestionItem,
 } from '../controllers/mockTestController.js';
+import app from '../app.js';
 
 function makeDatedQuiz({ id, question, createdAt, examName = 'SSC' }) {
   const { normalizedQuestion, questionHash } = computeQuestionHash(question);
@@ -152,4 +153,14 @@ test('validateMockQuestionItem accepts rich Maths + BOX questions', () => {
   assert.equal(valid.error, undefined);
   assert.equal(valid.visualType, 'box');
   assert.ok(valid.questionHash);
+});
+
+test('Express app mounts /api/mock-tests, /api/payments, and /api/telegram/webhook cleanly', () => {
+  const stack = app._router?.stack || [];
+  const routeStrings = stack.map((layer) =>
+    layer.route ? layer.route.path : String(layer.regexp || '')
+  );
+  assert.ok(routeStrings.some((s) => s.includes('mock-tests')));
+  assert.ok(routeStrings.some((s) => s.includes('payments')));
+  assert.ok(routeStrings.some((s) => s.includes('/api/telegram/webhook')));
 });

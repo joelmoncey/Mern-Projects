@@ -1,5 +1,3 @@
-import Redis from 'ioredis';
-
 export const REDIS_KEY_PREFIX = (
   process.env.REDIS_KEY_PREFIX || 'quizgram:'
 ).trim();
@@ -78,6 +76,17 @@ export async function connectRedis() {
 
   if (redisClient) {
     return redisClient;
+  }
+
+  let Redis;
+  try {
+    const mod = await import('ioredis');
+    Redis = mod.default || mod;
+  } catch {
+    console.warn(
+      '[redis] "ioredis" is not installed in server/node_modules (run `cd server && npm install`). Running with node-cache fallback.'
+    );
+    return null;
   }
 
   const client = new Redis(url, {

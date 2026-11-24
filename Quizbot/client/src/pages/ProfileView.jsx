@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Award,
   Check,
+  Clock,
   Coffee,
   Edit3,
   Flag,
@@ -12,10 +13,12 @@ import {
   Loader2,
   MessageCircle,
   Play,
+  Share2,
   Shield,
   SlidersHorizontal,
   Star,
   Target,
+  Timer,
   Trash2,
   UserCheck,
   UserPlus,
@@ -23,9 +26,15 @@ import {
   X,
 } from 'lucide-react';
 import { apiRequest } from '../lib/api.js';
-import { openAdminContactLink } from '../lib/telegram.js';
+import {
+  openAdminContactLink,
+  shareMockTestViaTelegram,
+} from '../lib/telegram.js';
+import { recordTodaySeenHashes } from '../lib/dailySeenCache.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import EditQuizModal from '../components/EditQuizModal.jsx';
+import EditMockTestModal from '../components/EditMockTestModal.jsx';
+import MockTestRunnerModal from '../components/MockTestRunnerModal.jsx';
 import ExamTopicPickerModal from '../components/ExamTopicPickerModal.jsx';
 import QuizCard from '../components/QuizCard.jsx';
 import { MathText, QuizVisualBlock } from '../components/QuizRichContent.jsx';
@@ -321,6 +330,12 @@ export default function ProfileView({
   const [groupedByExam, setGroupedByExam] = useState({});
   const [showPickerModal, setShowPickerModal] = useState(false);
 
+  // Creator's Mock Tests state (Start, Share in Telegram, Edit, Delete)
+  const [creatorMocks, setCreatorMocks] = useState([]);
+  const [activeMockTestId, setActiveMockTestId] = useState(null);
+  const [editingMockTestId, setEditingMockTestId] = useState(null);
+  const [mockShareToast, setMockShareToast] = useState('');
+
   const isAdmin = user?.role === 'admin';
 
   useEffect(() => {
@@ -395,6 +410,12 @@ export default function ProfileView({
       const data = await apiRequest(endpoint);
       setProfile(data.profile);
       setQuizzes(data.quizzes || []);
+
+      if (data.profile?._id) {
+        apiRequest(`/api/mock-tests?creatorId=${data.profile._id}`)
+          .then((mData) => setCreatorMocks(mData.mockTests || []))
+          .catch(() => setCreatorMocks([]));
+      }
     } catch (err) {
       setError(err.message || 'Failed to load profile');
     } finally {
@@ -972,6 +993,108 @@ export default function ProfileView({
             </div>
           )}
 
+          {/* Creator's Mock Tests Section (Start, Share in Telegram, Edit & Delete) */}
+          {creatorMocks.length > 0 && (
+            <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-2xs">
+              <div className="mb-2.5 flex items-center justify-between">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-wider text-slate-500 uppercase">
+                  <Timer className="h-3.5 w-3.5 text-indigo-600" />
+                  Mock Tests ({creatorMocks.length})
+                </span>
+                {mockShareToast && (
+                  <span className="rounded-full bg-slate-900 px-2.5 py-0.5 text-[10px] font-bold text-white">
+                    {mockShareToast}
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-col gap-2">
+                {creatorMocks.map((mock) => (
+                  <div
+                    key={mock._id}
+                    className="rounded-xl border border-slate-200 bg-slate-50/70 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-extrabold text-slate-900">
+                          {mock.title}
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                          <span className="rounded-full bg-white px-2 py-0.5 border border-slate-200">
+                            {mock.examName} › {mock.subjectName}
+                          </span>
+                          <span className="inline-flex items-center gap-0.5 rounded-full bg-indigo-50 px-2 py-0.5 text-indigo-700">
+                            <Clock className="h-2.5 w-2.5" />
+                            {mock.durationMinutes}m
+                          </span>
+                          <span>{mock.questionCount} Qs</span>
+                        </div>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const mode = await shareMockTestViaTelegram(mock);
+                            if (mode === 'copied') {
+                              setMockShareToast('Link copied!');
+                              setTimeout(() => setMockShareToast(''), 2000);
+                            }
+                          }}
+                          title="Share mock test in Telegram"
+                          className="rounded-full border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700"
+                        >
+                          <Share2 className="h-3 w-3" />
+                        </button>
+                        {canManageQuizzesHere && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setEditingMockTestId(mock._id)}
+                              title="Edit mock test"
+                              className="inline-flex items-center gap-0.5 rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-700 hover:bg-slate-100"
+                            >
+                              <Edit3 className="h-3 w-3" />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await apiRequest(`/api/mock-tests/${mock._id}`, {
+                                    method: 'DELETE',
+                                  });
+                                  setCreatorMocks((prev) =>
+                                    prev.filter((m) => m._id !== mock._id)
+                                  );
+                                } catch (err) {
+                                  setError(
+                                    err.message || 'Could not delete mock test'
+                                  );
+                                }
+                              }}
+                              title="Delete mock test"
+                              className="rounded-full border border-slate-200 bg-white p-1.5 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setActiveMockTestId(mock._id)}
+                          className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2.5 py-1 text-[10px] font-bold text-white hover:bg-indigo-600"
+                        >
+                          <Play className="h-2.5 w-2.5 fill-current" />
+                          <span>Start</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Single-Topic Selector (Pre-selected from user's Exam & Subject filter) + Scroll Section */}
           {quizzes.length === 0 ? (
             <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-xs text-slate-500 shadow-2xs">
@@ -1065,6 +1188,32 @@ export default function ProfileView({
           quiz={editingQuiz}
           onClose={() => setEditingQuiz(null)}
           onSaved={() => {
+            loadProfile();
+          }}
+        />
+      )}
+
+      {editingMockTestId && (
+        <EditMockTestModal
+          mockTestId={editingMockTestId}
+          onClose={() => setEditingMockTestId(null)}
+          onSaved={() => {
+            loadProfile();
+          }}
+        />
+      )}
+
+      {activeMockTestId && (
+        <MockTestRunnerModal
+          mockTestId={activeMockTestId}
+          onClose={() => setActiveMockTestId(null)}
+          onCompleted={(seenHashesFromMock, nextStats) => {
+            if (seenHashesFromMock?.length) {
+              recordTodaySeenHashes(seenHashesFromMock);
+            }
+            if (nextStats) {
+              updateUserStats?.(nextStats);
+            }
             loadProfile();
           }}
         />

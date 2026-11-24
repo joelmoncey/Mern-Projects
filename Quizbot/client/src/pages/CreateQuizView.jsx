@@ -809,13 +809,13 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
                     Question (supports $...$ Maths)
                   </label>
                   <span className="text-[11px] font-medium text-slate-400">
-                    {question.length}/600
+                    {question.length}/3000
                   </span>
                 </div>
                 <textarea
                   id="quiz-question"
-                  rows={3}
-                  maxLength={600}
+                  rows={4}
+                  maxLength={3000}
                   required
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
@@ -988,13 +988,13 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
                     Explanation (optional)
                   </label>
                   <span className="text-[11px] font-medium text-slate-400">
-                    {explanation.length}/800
+                    {explanation.length}/2000
                   </span>
                 </div>
                 <textarea
                   id="quiz-explanation"
                   rows={3}
-                  maxLength={800}
+                  maxLength={2000}
                   value={explanation}
                   onChange={(e) => setExplanation(e.target.value)}
                   placeholder="Explain why the answer is right..."

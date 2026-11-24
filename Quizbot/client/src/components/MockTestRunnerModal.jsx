@@ -11,9 +11,11 @@ import {
   Loader2,
   RotateCcw,
   Send,
+  Share2,
   X,
 } from 'lucide-react';
 import { apiRequest } from '../lib/api.js';
+import { shareMockTestViaTelegram } from '../lib/telegram.js';
 import { MathText, QuizVisualBlock } from './QuizRichContent.jsx';
 
 function formatTimer(totalSeconds) {
@@ -46,6 +48,16 @@ export default function MockTestRunnerModal({
   const [confirmExit, setConfirmExit] = useState(false);
   const [result, setResult] = useState(null);
   const [reviewFilter, setReviewFilter] = useState('all'); // 'all' | 'wrong' | 'right' | 'skipped'
+  const [shareNote, setShareNote] = useState('');
+
+  async function handleShareMock(scoreSummary = null) {
+    if (!mockTest) return;
+    const mode = await shareMockTestViaTelegram(mockTest, scoreSummary);
+    if (mode === 'copied') {
+      setShareNote('Mock test link copied!');
+      setTimeout(() => setShareNote(''), 2200);
+    }
+  }
 
   const autoSubmittedRef = useRef(false);
 
@@ -230,6 +242,14 @@ export default function MockTestRunnerModal({
 
         {!result && !loading && questions.length > 0 && (
           <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => handleShareMock(null)}
+              title="Share mock test in Telegram"
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+            </button>
             <span
               className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-mono text-xs font-extrabold ${timerTone}`}
             >
@@ -247,6 +267,12 @@ export default function MockTestRunnerModal({
           </div>
         )}
       </header>
+
+      {shareNote && (
+        <div className="pointer-events-none fixed top-14 left-1/2 z-50 -translate-x-1/2 rounded-full bg-slate-900 px-3.5 py-1 text-xs font-bold text-white shadow-md">
+          {shareNote}
+        </div>
+      )}
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-4 pt-3 pb-24">
@@ -326,6 +352,17 @@ export default function MockTestRunnerModal({
               </div>
 
               <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleShareMock(result.summary)}
+                  className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-indigo-600 py-2 text-xs font-extrabold text-white shadow-2xs hover:bg-indigo-500 active:scale-[0.99]"
+                >
+                  <Share2 className="h-3.5 w-3.5" />
+                  <span>Share in Telegram</span>
+                </button>
+              </div>
+
+              <div className="mt-2 flex gap-2">
                 <button
                   type="button"
                   onClick={loadMockTest}
@@ -539,14 +576,33 @@ export default function MockTestRunnerModal({
                 </div>
               </div>
 
-              <h3 className="text-[16px] leading-snug font-bold text-slate-900">
-                <MathText text={currentQuestion.question} />
-              </h3>
+              <div
+                className={
+                  (currentQuestion.question || '').length > 350
+                    ? 'max-h-[38dvh] overflow-y-auto overscroll-contain pr-1'
+                    : ''
+                }
+              >
+                <h3
+                  className={`text-slate-900 ${
+                    (currentQuestion.question || '').length > 350
+                      ? 'text-[13.5px] leading-relaxed font-semibold'
+                      : 'text-[16px] leading-snug font-bold'
+                  }`}
+                >
+                  <MathText text={currentQuestion.question} />
+                </h3>
 
-              <QuizVisualBlock
-                visualType={currentQuestion.visualType}
-                visualData={currentQuestion.visualData}
-              />
+                <QuizVisualBlock
+                  visualType={currentQuestion.visualType}
+                  visualData={currentQuestion.visualData}
+                />
+              </div>
+              {(currentQuestion.question || '').length > 350 && (
+                <p className="mt-1.5 border-t border-slate-100 pt-1 text-right text-[10px] font-bold text-slate-400">
+                  ↕ Scroll inside box to read full passage
+                </p>
+              )}
             </div>
 
             {/* 4 Selectable Options */}

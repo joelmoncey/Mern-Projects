@@ -79,7 +79,7 @@ const quizSchema = new Schema(
       type: String,
       required: true,
       trim: true,
-      maxlength: 600,
+      maxlength: 3000,
     },
     // Optional rich visual block attached to the question (Maths Box, Table, inline SVG drawing, or Image URL)
     visualType: {
@@ -126,7 +126,7 @@ const quizSchema = new Schema(
     explanation: {
       type: String,
       trim: true,
-      maxlength: 800,
+      maxlength: 2000,
       default: '',
     },
     likes: [

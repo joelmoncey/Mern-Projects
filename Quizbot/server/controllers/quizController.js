@@ -50,8 +50,8 @@ function validateQuizPayload({
   if (!question || typeof question !== 'string' || !question.trim()) {
     return { error: 'Question text is required' };
   }
-  if (question.trim().length > 600) {
-    return { error: 'Question must be 600 characters or fewer' };
+  if (question.trim().length > 3000) {
+    return { error: 'Question must be 3000 characters or fewer' };
   }
 
   if (
@@ -72,8 +72,8 @@ function validateQuizPayload({
   }
 
   const trimmedExplanation = String(explanation || '').trim();
-  if (trimmedExplanation.length > 800) {
-    return { error: 'Explanation must be 800 characters or fewer' };
+  if (trimmedExplanation.length > 2000) {
+    return { error: 'Explanation must be 2000 characters or fewer' };
   }
 
   const visual = validateAndSanitizeVisual({ visualType, visualData });

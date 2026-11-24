@@ -115,6 +115,121 @@ export function getDeepLinkedQuizId() {
 }
 
 /**
+ * Extracts a deep-linked mock test ID when the Mini App is opened from a shared
+ * Telegram link (e.g. ?startapp=mock_<id>, initDataUnsafe.start_param, or ?mock=<id>).
+ *
+ * @returns {string | null}
+ */
+export function getDeepLinkedMockTestId() {
+  try {
+    const searchParams = new URLSearchParams(window.location.search);
+
+    const rawStartParam =
+      window?.Telegram?.WebApp?.initDataUnsafe?.start_param ||
+      searchParams.get('tgWebAppStartParam') ||
+      searchParams.get('startapp') ||
+      '';
+
+    if (rawStartParam) {
+      const cleaned = String(rawStartParam).trim();
+      if (cleaned.startsWith('mock_')) {
+        const extracted = cleaned.slice(5).trim();
+        if (extracted) return extracted;
+      }
+    }
+
+    const directMockId = searchParams.get('mock');
+    if (directMockId && directMockId.trim()) {
+      return directMockId.trim();
+    }
+  } catch {
+    // Ignore
+  }
+
+  return null;
+}
+
+/**
+ * Builds the deep-link URL for sharing a specific timed Mock Test.
+ * Uses https://t.me/<VITE_BOT_USERNAME>/<VITE_APP_SHORT_NAME>?startapp=mock_<id>
+ * when configured, falling back to the web URL with ?mock=<id>.
+ */
+export function buildMockTestShareUrl(mockTestId) {
+  const botUsername = (import.meta.env.VITE_BOT_USERNAME || '')
+    .trim()
+    .replace(/^@/, '');
+  const appShortName = (import.meta.env.VITE_APP_SHORT_NAME || '').trim();
+
+  if (botUsername && appShortName) {
+    return `https://t.me/${botUsername}/${appShortName}?startapp=mock_${mockTestId}`;
+  }
+  if (botUsername) {
+    return `https://t.me/${botUsername}?startapp=mock_${mockTestId}`;
+  }
+  return `${window.location.origin}/?mock=${mockTestId}`;
+}
+
+/**
+ * Shares a timed Mock Test inside Telegram via the native share picker
+ * (with Web Share API and clipboard fallback in browsers).
+ */
+export async function shareMockTestViaTelegram(mockTest, scoreSummary = null) {
+  if (!mockTest?._id) return 'failed';
+  const shareUrl = buildMockTestShareUrl(mockTest._id);
+  const topicLine = [mockTest.examName, mockTest.subjectName]
+    .filter(Boolean)
+    .join(' › ');
+  const metaLine = `${mockTest.questionCount || ''} Questions · ${mockTest.durationMinutes || 15} min`;
+  const challengeLine = scoreSummary
+    ? `I scored ${scoreSummary.score}/${scoreSummary.maxScore} (${scoreSummary.accuracyPercent}% accuracy)! Can you beat my score?`
+    : 'Attempt this timed Mock Test on Quiz-Gram!';
+
+  const shareText = `⏱ Timed Mock Test: ${mockTest.title}\n📚 ${topicLine} (${metaLine})\n\n${challengeLine}`;
+  const telegramShareUrl = `https://t.me/share/url?url=${encodeURIComponent(
+    shareUrl
+  )}&text=${encodeURIComponent(shareText)}`;
+
+  try {
+    if (openTelegramLink.isAvailable()) {
+      openTelegramLink(telegramShareUrl);
+      return 'telegram';
+    }
+  } catch {
+    // Fallback below
+  }
+
+  if (typeof window?.Telegram?.WebApp?.openTelegramLink === 'function') {
+    try {
+      window.Telegram.WebApp.openTelegramLink(telegramShareUrl);
+      return 'telegram';
+    } catch {
+      // Fallback below
+    }
+  }
+
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: `Mock Test: ${mockTest.title}`,
+        text: shareText,
+        url: shareUrl,
+      });
+      return 'native';
+    } catch {
+      // Cancelled
+    }
+  }
+
+  try {
+    await navigator.clipboard.writeText(`${shareText}\n${shareUrl}`);
+    return 'copied';
+  } catch {
+    window.open(telegramShareUrl, '_blank', 'noopener,noreferrer');
+    return 'link';
+  }
+}
+
+/**
  * Builds the deep-link URL for sharing a specific quiz card.
  * Uses https://t.me/<VITE_BOT_USERNAME>/<VITE_APP_SHORT_NAME>?startapp=quiz_<id>
  * when configured, falling back to the web URL with ?quiz=<id>.

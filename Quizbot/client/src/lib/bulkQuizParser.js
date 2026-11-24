@@ -166,12 +166,12 @@ export function parseBulkQuizzesText(rawText) {
           }
 
           quizzes.push({
-            question: qText.slice(0, 600),
+            question: qText.slice(0, 3000),
             visualType,
             visualData,
             options: opts,
             correctIndex: ansIdx,
-            explanation: exp.slice(0, 800),
+            explanation: exp.slice(0, 2000),
           });
         });
         return { quizzes, errors };
@@ -402,10 +402,10 @@ export function parseBulkQuizzesText(rawText) {
       return;
     }
 
-    if (question.length > 600) {
+    if (question.length > 3000) {
       errors.push({
         blockNumber,
-        reason: `Question exceeds 600 characters (${question.length}/600)`,
+        reason: `Question exceeds 3000 characters (${question.length}/3000)`,
         snippet,
       });
       return;
@@ -435,7 +435,7 @@ export function parseBulkQuizzesText(rawText) {
       visualData,
       options,
       correctIndex,
-      explanation: explanation.slice(0, 800),
+      explanation: explanation.slice(0, 2000),
     });
   });
 

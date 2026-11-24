@@ -3,10 +3,12 @@ import {
   Award,
   Clock,
   Coffee,
+  Edit3,
   Flame,
   Loader2,
   Play,
   RefreshCw,
+  Share2,
   SlidersHorizontal,
   Timer,
   Trash2,
@@ -21,11 +23,16 @@ import {
   loadTodaySeenHashes,
   recordTodaySeenHashes,
 } from '../lib/dailySeenCache.js';
-import { getDeepLinkedQuizId } from '../lib/telegram.js';
+import {
+  getDeepLinkedMockTestId,
+  getDeepLinkedQuizId,
+  shareMockTestViaTelegram,
+} from '../lib/telegram.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import QuizCard from '../components/QuizCard.jsx';
 import ExamTopicPickerModal from '../components/ExamTopicPickerModal.jsx';
 import MockTestRunnerModal from '../components/MockTestRunnerModal.jsx';
+import EditMockTestModal from '../components/EditMockTestModal.jsx';
 
 const OFFLINE_SAMPLE_QUIZZES = [
   {
@@ -116,7 +123,18 @@ export default function FeedView({
   const [mockTests, setMockTests] = useState([]);
   const [loadingMocks, setLoadingMocks] = useState(false);
   const [mocksError, setMocksError] = useState('');
-  const [activeMockTestId, setActiveMockTestId] = useState(null);
+  const [activeMockTestId, setActiveMockTestId] = useState(() =>
+    getDeepLinkedMockTestId()
+  );
+  const [editingMockTestId, setEditingMockTestId] = useState(null);
+  const [shareToast, setShareToast] = useState('');
+
+  // Auto-switch to Mocks tab if opened from a shared Telegram Mock Test deep link (?startapp=mock_<id>)
+  useEffect(() => {
+    if (getDeepLinkedMockTestId()) {
+      setFeedTab('mocks');
+    }
+  }, []);
 
   const sentinelRef = useRef(null);
   const initialDeepLinkRef = useRef(getDeepLinkedQuizId());
@@ -413,6 +431,14 @@ export default function FeedView({
     }
   }
 
+  async function handleShareMockTest(mock) {
+    const mode = await shareMockTestViaTelegram(mock);
+    if (mode === 'copied') {
+      setShareToast('Mock test link copied!');
+      setTimeout(() => setShareToast(''), 2200);
+    }
+  }
+
   const handleQuizViewedToday = useCallback((questionHash) => {
     if (questionHash) {
       recordTodaySeenHashes([questionHash]);
@@ -487,14 +513,14 @@ export default function FeedView({
 
   return (
     <div className="relative h-dvh w-full bg-[#F8FAFC]">
-      {/* Translucent White Top Header with Exam/Subject Filter + "Edit" Button */}
-      <header className="fixed inset-x-0 top-0 z-20 mx-auto max-w-md border-b border-slate-200 bg-white/95 px-4 pt-2.5 pb-2.5 shadow-2xs backdrop-blur-md">
+      {/* Clean 2-Row Translucent White Top Header (Zero Wrapping, Zero Clipping) */}
+      <header className="fixed inset-x-0 top-0 z-20 mx-auto max-w-md border-b border-slate-200 bg-white/95 px-3.5 pt-2 pb-2 shadow-2xs backdrop-blur-md">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-3">
             <button
               type="button"
               onClick={() => setFeedTab('forYou')}
-              className={`relative pb-1 text-xs font-bold tracking-tight transition ${
+              className={`relative pb-1 text-xs font-bold tracking-tight whitespace-nowrap transition ${
                 feedTab === 'forYou'
                   ? 'text-slate-900'
                   : 'text-slate-400 hover:text-slate-700'
@@ -508,7 +534,7 @@ export default function FeedView({
             <button
               type="button"
               onClick={() => setFeedTab('following')}
-              className={`relative pb-1 text-xs font-bold tracking-tight transition ${
+              className={`relative pb-1 text-xs font-bold tracking-tight whitespace-nowrap transition ${
                 feedTab === 'following'
                   ? 'text-slate-900'
                   : 'text-slate-400 hover:text-slate-700'
@@ -522,13 +548,13 @@ export default function FeedView({
             <button
               type="button"
               onClick={() => setFeedTab('mocks')}
-              className={`relative inline-flex items-center gap-1 pb-1 text-xs font-bold tracking-tight transition ${
+              className={`relative inline-flex items-center gap-1 pb-1 text-xs font-bold tracking-tight whitespace-nowrap transition ${
                 feedTab === 'mocks'
                   ? 'text-indigo-700'
                   : 'text-slate-400 hover:text-slate-700'
               }`}
             >
-              <Timer className="h-3 w-3" />
+              <Timer className="h-3 w-3 shrink-0" />
               <span>Mocks</span>
               {feedTab === 'mocks' && (
                 <span className="absolute inset-x-0 bottom-0 h-[2.5px] rounded-full bg-indigo-600" />
@@ -536,14 +562,14 @@ export default function FeedView({
             </button>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5">
             {onOpenChaiModal && (
               <button
                 type="button"
                 onClick={onOpenChaiModal}
                 title="Buy Quiz-Gram a Chai (1 Star = ₹2)"
                 aria-label="Buy Quiz-Gram a Chai"
-                className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-gradient-to-r from-amber-50 to-orange-50 px-2.5 py-0.5 text-[11px] font-extrabold text-amber-900 shadow-2xs transition hover:border-amber-400 hover:bg-amber-100 active:scale-95"
+                className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-gradient-to-r from-amber-50 to-orange-50 px-2 py-0.5 text-[10px] font-extrabold text-amber-900 shadow-2xs transition hover:border-amber-400 hover:bg-amber-100 active:scale-95"
               >
                 <Coffee className="h-3 w-3 text-amber-600" />
                 <span>Chai</span>
@@ -551,40 +577,47 @@ export default function FeedView({
             )}
 
             {user && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">
+              <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
                 <Flame className="h-3 w-3 fill-amber-500 text-amber-500" />
                 {user.streakCount || 0}
               </span>
             )}
 
-            {/* Active Exam & Subject Pill + Edit Button */}
             {exams.length > 0 && (
               <button
                 type="button"
                 onClick={() => setShowPickerModal(true)}
-                className="inline-flex max-w-[165px] items-center gap-1 rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-bold text-white shadow-2xs transition hover:bg-slate-800 active:scale-95"
-                title="Change Exam & Subject"
+                className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2.5 py-1 text-[10px] font-bold whitespace-nowrap text-white shadow-2xs transition hover:bg-slate-800 active:scale-95"
+                title={activeFilterSummary}
               >
                 <SlidersHorizontal className="h-3 w-3 shrink-0" />
-                <span className="truncate">{activeFilterSummary}</span>
-                <span className="rounded-full bg-white/20 px-1.5 py-0.2 text-[9px] uppercase">
-                  Edit
-                </span>
+                <span>Filter</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* Quick Subject Switcher Pills inside the Selected Exam (All Subjects + Individual Subjects) */}
-        {subjectsForActiveExam.length > 0 && (
-          <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <span className="shrink-0 rounded-full border border-slate-300 bg-slate-100 px-2.5 py-0.5 text-[10px] font-extrabold tracking-wider text-slate-800 uppercase">
-              {activeExam}
-            </span>
+        {/* Row 2: Active Exam Pill (opens Filter) + Quick Subject Switcher */}
+        {exams.length > 0 && (
+          <div className="mt-1.5 flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <button
+              type="button"
+              onClick={() => setShowPickerModal(true)}
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-300 bg-slate-100 px-2.5 py-0.5 text-[10px] font-extrabold tracking-wide text-slate-900 uppercase hover:bg-slate-200 active:scale-95"
+              title="Tap to change Exam, Language or Sub Exam"
+            >
+              <span>{activeExam}</span>
+              {examFilter?.subExams?.length > 0 && (
+                <span className="font-semibold text-slate-600 normal-case">
+                  · {examFilter.subExams.slice(0, 2).join(', ')}
+                </span>
+              )}
+              <span className="text-slate-400">▾</span>
+            </button>
             <button
               type="button"
               onClick={() => handleQuickSwitchSubject('ALL')}
-              className={`shrink-0 rounded-full border px-3 py-0.5 text-[11px] font-bold transition active:scale-95 ${
+              className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-bold transition active:scale-95 ${
                 !activeSubject
                   ? 'border-emerald-600 bg-emerald-600 text-white shadow-2xs'
                   : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
@@ -599,7 +632,7 @@ export default function FeedView({
                   key={subj}
                   type="button"
                   onClick={() => handleQuickSwitchSubject(subj)}
-                  className={`shrink-0 rounded-full border px-3 py-0.5 text-[11px] font-bold transition active:scale-95 ${
+                  className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-bold transition active:scale-95 ${
                     active
                       ? 'border-emerald-600 bg-emerald-600 text-white shadow-2xs'
                       : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
@@ -704,16 +737,37 @@ export default function FeedView({
                       )}
                     </div>
 
-                    {mock.canManage && (
+                    <div className="flex shrink-0 items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => handleDeleteMockTest(mock._id)}
-                        title="Delete mock test"
-                        className="rounded-full border border-slate-200 p-1.5 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                        onClick={() => handleShareMockTest(mock)}
+                        title="Share mock test in Telegram"
+                        className="rounded-full border border-slate-200 bg-white p-1.5 text-slate-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 active:scale-95"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Share2 className="h-3.5 w-3.5" />
                       </button>
-                    )}
+                      {mock.canManage && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setEditingMockTestId(mock._id)}
+                            title="Edit mock test & questions"
+                            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-700 hover:bg-slate-50 active:scale-95"
+                          >
+                            <Edit3 className="h-3 w-3" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMockTest(mock._id)}
+                            title="Delete mock test"
+                            className="rounded-full border border-slate-200 p-1.5 text-slate-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
 
                   <h3 className="text-sm font-extrabold text-slate-900">
@@ -890,6 +944,22 @@ export default function FeedView({
           }}
         />
       )}
+      {shareToast && (
+        <div className="pointer-events-none fixed top-24 left-1/2 z-40 -translate-x-1/2 rounded-full bg-slate-900 px-4 py-1.5 text-xs font-bold text-white shadow-md">
+          {shareToast}
+        </div>
+      )}
+
+      {editingMockTestId && (
+        <EditMockTestModal
+          mockTestId={editingMockTestId}
+          onClose={() => setEditingMockTestId(null)}
+          onSaved={() => {
+            fetchMockTests();
+          }}
+        />
+      )}
+
       {activeMockTestId && (
         <MockTestRunnerModal
           mockTestId={activeMockTestId}

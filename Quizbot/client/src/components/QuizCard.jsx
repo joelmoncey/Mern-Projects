@@ -231,10 +231,21 @@ export default function QuizCard({
         )
       : null;
 
+  const questionLen = (quiz.question || '').length;
+  const isLongPassage = questionLen > 320;
+  const questionSizeClass =
+    questionLen > 320
+      ? 'text-[13px] leading-relaxed font-semibold'
+      : questionLen > 210
+        ? 'text-[13.5px] leading-snug font-bold'
+        : questionLen > 120
+          ? 'text-[14.5px] leading-snug font-bold'
+          : 'text-[16px] leading-snug font-bold';
+
   return (
     <section
       ref={cardRef}
-      className="quiz-feed-card relative flex w-full flex-col justify-between bg-[#F8FAFC] px-4 pt-24 pb-20"
+      className="quiz-feed-card relative flex w-full flex-col bg-[#F8FAFC] px-3.5 pt-[84px] pb-[68px]"
     >
       {/* Toast pill */}
       {toast && (
@@ -243,53 +254,50 @@ export default function QuizCard({
         </div>
       )}
 
-      {/* Top Metadata Bar: Hashtag + 5-Level Hierarchy Breadcrumb + Syllabus */}
-      <div className="flex flex-col gap-1.5 pr-12">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-[11px] font-bold tracking-wide text-white uppercase shadow-xs">
-            #{tagLabel}
-          </span>
+      {/* Clean Single-Line Context Bar (Breadcrumb + Language + Syllabus) */}
+      <div className="mb-2 flex shrink-0 flex-col gap-1.5">
+        <div className="flex items-center gap-1.5 pr-1">
+          <div
+            title={`#${tagLabel} · ${hierarchyLabel}`}
+            className="inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-full border border-slate-200/90 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 shadow-2xs"
+          >
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate-900" />
+            <span className="truncate">{hierarchyLabel}</span>
+          </div>
+
           {quiz.language && (
-            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-slate-700 uppercase shadow-2xs">
-              {quiz.language}
+            <span className="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 uppercase">
+              {quiz.language.slice(0, 3)}
             </span>
           )}
+
           {quiz.isRevisionRepeat && (
-            <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold tracking-wider text-indigo-700 uppercase">
-              Revision
+            <span className="shrink-0 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] font-bold text-indigo-700">
+              Rev
             </span>
           )}
-          {quiz.editCount > 0 && (
-            <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold tracking-wider text-slate-600 uppercase">
-              Edited
-            </span>
-          )}
+
           {syllabusScope && (
             <button
               type="button"
               onClick={() => setShowSyllabus((prev) => !prev)}
-              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition active:scale-95 ${
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold transition active:scale-95 ${
                 showSyllabus
                   ? 'border-slate-900 bg-slate-900 text-white'
-                  : 'border-slate-200 bg-white text-slate-700 shadow-2xs hover:bg-slate-100'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
               }`}
+              title="View syllabus scope"
             >
               <BookOpen className="h-3 w-3" />
-              <span>Syllabus</span>
             </button>
           )}
         </div>
 
-        {/* Full Hierarchy Breadcrumb: Exam › Sub Exam › Subject › Sub Subject › Sub Topic */}
-        <div className="inline-flex w-fit max-w-full items-center truncate rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 shadow-2xs">
-          <span className="truncate">{hierarchyLabel}</span>
-        </div>
-
         {showSyllabus && syllabusScope && (
-          <div className="flex items-start justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs leading-relaxed text-slate-700 shadow-sm">
+          <div className="flex items-start justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] leading-relaxed text-slate-700 shadow-sm">
             <div>
               <span className="mb-0.5 block text-[10px] font-bold tracking-wider text-slate-500 uppercase">
-                Syllabus Scope
+                #{tagLabel} &middot; Syllabus Scope
               </span>
               {syllabusScope}
             </div>
@@ -305,190 +313,209 @@ export default function QuizCard({
         )}
       </div>
 
-      {/* Main Question + 4 Option Cards (with right padding for the Instagram vertical rail) */}
-      <div className="my-auto flex flex-col gap-3 py-2 pr-14">
-        <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-xs">
-          <h2 className="text-[17px] leading-snug font-bold tracking-tight text-slate-900">
-            <MathText text={quiz.question} />
-          </h2>
-          <QuizVisualBlock
-            visualType={quiz.visualType}
-            visualData={quiz.visualData}
-          />
-        </div>
-
-        <div className="flex flex-col gap-2.5">
-          {quiz.options.map((option, idx) => {
-            const isCorrectOption =
-              isAnswered && idx === attemptResult.correctIndex;
-            const isWrongSelected =
-              isAnswered &&
-              idx === selectedIndex &&
-              idx !== attemptResult.correctIndex;
-
-            let cardClasses =
-              'border-slate-200 bg-white text-slate-900 shadow-xs hover:border-slate-300 hover:bg-slate-50/80 active:scale-[0.99]';
-            let letterClasses =
-              'border border-slate-200 bg-slate-100 text-slate-700';
-
-            if (isCorrectOption) {
-              cardClasses =
-                'border-emerald-500 bg-emerald-50 text-emerald-950 shadow-sm ring-1 ring-emerald-500/20';
-              letterClasses = 'bg-emerald-600 text-white shadow-2xs';
-            } else if (isWrongSelected) {
-              cardClasses =
-                'border-rose-500 bg-rose-50 text-rose-950 shadow-sm ring-1 ring-rose-500/20';
-              letterClasses = 'bg-rose-600 text-white shadow-2xs';
-            } else if (isAnswered) {
-              cardClasses =
-                'border-slate-200/70 bg-white/60 text-slate-400 opacity-75';
-              letterClasses =
-                'border border-slate-200 bg-slate-100 text-slate-400';
-            }
-
-            return (
-              <button
-                key={`${quiz._id}-opt-${idx}`}
-                type="button"
-                disabled={isAnswered || submittingAttempt}
-                onClick={() => handleSelectOption(idx)}
-                className={`flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left text-sm font-medium transition ${cardClasses}`}
-              >
-                <span
-                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${letterClasses}`}
-                >
-                  {String.fromCharCode(65 + idx)}
-                </span>
-                <span
-                  className={`flex-1 leading-snug ${
-                    isCorrectOption
-                      ? 'font-bold text-emerald-950'
-                      : isWrongSelected
-                        ? 'font-semibold text-rose-950'
-                        : ''
-                  }`}
-                >
-                  <MathText text={option} />
-                </span>
-                {isCorrectOption && (
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-0.5 text-[10px] font-bold tracking-wider text-white uppercase shadow-2xs">
-                    <Check className="h-3 w-3 stroke-[3]" />
-                    Right
-                  </span>
-                )}
-                {isWrongSelected && (
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-600 px-2.5 py-0.5 text-[10px] font-bold tracking-wider text-white uppercase shadow-2xs">
-                    <X className="h-3 w-3 stroke-[3]" />
-                    Wrong
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Matching Green / Red Explanation Box */}
-        {isAnswered && showExplanation && (
-          <div
-            className={`rounded-xl border p-3.5 text-xs leading-relaxed shadow-xs ${
-              attemptResult.isCorrect
-                ? 'border-emerald-200 bg-emerald-50/90 text-emerald-950'
-                : 'border-rose-200 bg-rose-50/90 text-rose-950'
-            }`}
-          >
+      {/* Main Scroll-Safe Question + 4 Option Cards (All 4 options always visible & reachable) */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pr-12 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="my-auto flex flex-col gap-2 py-1">
+          <div className="rounded-2xl border border-slate-200/90 bg-white p-3.5 shadow-2xs">
             <div
-              className={`mb-1.5 flex items-center justify-between border-b pb-1.5 ${
+              className={
+                isLongPassage
+                  ? 'max-h-[34dvh] overflow-y-auto overscroll-contain pr-1'
+                  : ''
+              }
+            >
+              <h2
+                className={`tracking-tight text-slate-900 ${questionSizeClass}`}
+              >
+                <MathText text={quiz.question} />
+              </h2>
+              <QuizVisualBlock
+                visualType={quiz.visualType}
+                visualData={quiz.visualData}
+              />
+            </div>
+            {isLongPassage && (
+              <div className="mt-1.5 flex items-center justify-end border-t border-slate-100 pt-1">
+                <span className="text-[10px] font-bold text-slate-400">
+                  ↕ Scroll inside box to read full question
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            {quiz.options.map((option, idx) => {
+              const isCorrectOption =
+                isAnswered && idx === attemptResult.correctIndex;
+              const isWrongSelected =
+                isAnswered &&
+                idx === selectedIndex &&
+                idx !== attemptResult.correctIndex;
+
+              let cardClasses =
+                'border-slate-200 bg-white text-slate-900 shadow-2xs hover:border-slate-300 hover:bg-slate-50/80 active:scale-[0.99]';
+              let letterClasses =
+                'border border-slate-200 bg-slate-100 text-slate-700';
+
+              if (isCorrectOption) {
+                cardClasses =
+                  'border-emerald-500 bg-emerald-50 text-emerald-950 shadow-xs ring-1 ring-emerald-500/20';
+                letterClasses = 'bg-emerald-600 text-white shadow-2xs';
+              } else if (isWrongSelected) {
+                cardClasses =
+                  'border-rose-500 bg-rose-50 text-rose-950 shadow-xs ring-1 ring-rose-500/20';
+                letterClasses = 'bg-rose-600 text-white shadow-2xs';
+              } else if (isAnswered) {
+                cardClasses =
+                  'border-slate-200/70 bg-white/60 text-slate-400 opacity-75';
+                letterClasses =
+                  'border border-slate-200 bg-slate-100 text-slate-400';
+              }
+
+              return (
+                <button
+                  key={`${quiz._id}-opt-${idx}`}
+                  type="button"
+                  disabled={isAnswered || submittingAttempt}
+                  onClick={() => handleSelectOption(idx)}
+                  className={`flex w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left text-[13px] font-medium transition ${cardClasses}`}
+                >
+                  <span
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ${letterClasses}`}
+                  >
+                    {String.fromCharCode(65 + idx)}
+                  </span>
+                  <span
+                    className={`flex-1 leading-snug ${
+                      isCorrectOption
+                        ? 'font-bold text-emerald-950'
+                        : isWrongSelected
+                          ? 'font-semibold text-rose-950'
+                          : ''
+                    }`}
+                  >
+                    <MathText text={option} />
+                  </span>
+                  {isCorrectOption && (
+                    <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-emerald-600 px-2 py-0.5 text-[9px] font-bold tracking-wider text-white uppercase">
+                      <Check className="h-2.5 w-2.5 stroke-[3]" />
+                      Right
+                    </span>
+                  )}
+                  {isWrongSelected && (
+                    <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-rose-600 px-2 py-0.5 text-[9px] font-bold tracking-wider text-white uppercase">
+                      <X className="h-2.5 w-2.5 stroke-[3]" />
+                      Wrong
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Matching Green / Red Explanation Box */}
+          {isAnswered && showExplanation && (
+            <div
+              className={`rounded-xl border p-3 text-xs leading-relaxed shadow-2xs ${
                 attemptResult.isCorrect
-                  ? 'border-emerald-200/80'
-                  : 'border-rose-200/80'
+                  ? 'border-emerald-200 bg-emerald-50/90 text-emerald-950'
+                  : 'border-rose-200 bg-rose-50/90 text-rose-950'
               }`}
             >
-              <span
-                className={`inline-flex items-center gap-1 font-bold tracking-wider uppercase ${
-                  attemptResult.isCorrect ? 'text-emerald-700' : 'text-rose-700'
+              <div
+                className={`mb-1 flex items-center justify-between border-b pb-1 ${
+                  attemptResult.isCorrect
+                    ? 'border-emerald-200/80'
+                    : 'border-rose-200/80'
                 }`}
               >
-                {attemptResult.isCorrect ? '✓ Right Answer' : '✕ Wrong Answer'}
-              </span>
-              {accuracyPct !== null && (
-                <span className="text-[11px] font-semibold opacity-80">
-                  {accuracyPct}% accuracy ({attemptResult.attemptsCount})
+                <span
+                  className={`inline-flex items-center gap-1 text-[11px] font-bold tracking-wider uppercase ${
+                    attemptResult.isCorrect ? 'text-emerald-700' : 'text-rose-700'
+                  }`}
+                >
+                  {attemptResult.isCorrect ? '✓ Right Answer' : '✕ Wrong Answer'}
                 </span>
-              )}
+                {accuracyPct !== null && (
+                  <span className="text-[10px] font-semibold opacity-80">
+                    {accuracyPct}% accuracy ({attemptResult.attemptsCount})
+                  </span>
+                )}
+              </div>
+              <p className="font-medium">
+                <MathText
+                  text={
+                    attemptResult.explanation ||
+                    'No explanation provided by the creator.'
+                  }
+                />
+              </p>
             </div>
-            <p className="font-medium">
-              <MathText
-                text={
-                  attemptResult.explanation ||
-                  'No explanation provided by the creator.'
-                }
-              />
-            </p>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* Right-Side Vertical Action Rail (Instagram Reels / Shorts Style) */}
+      {/* Right-Side Compact Vertical Action Rail */}
       <aside
         aria-label="Quiz actions"
-        className="absolute right-3 bottom-24 z-10 flex flex-col items-center gap-3.5"
+        className="absolute right-2.5 bottom-20 z-10 flex flex-col items-center gap-2.5"
       >
         {/* Like Button */}
-        <div className="flex flex-col items-center gap-1">
+        <div className="flex flex-col items-center gap-0.5">
           <button
             type="button"
             onClick={handleLike}
             aria-label="Like quiz"
-            className={`flex h-11 w-11 items-center justify-center rounded-full border shadow-sm transition active:scale-95 ${
+            className={`flex h-9 w-9 items-center justify-center rounded-full border shadow-xs transition active:scale-95 ${
               liked
                 ? 'border-rose-200 bg-rose-50 text-rose-600'
                 : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
             }`}
           >
             <Heart
-              className={`h-5 w-5 ${
+              className={`h-4 w-4 ${
                 liked ? 'fill-rose-500 text-rose-500' : ''
               }`}
             />
           </button>
-          <span className="text-[11px] font-semibold text-slate-600">
+          <span className="text-[10px] font-semibold text-slate-600">
             {likesCount}
           </span>
         </div>
 
         {/* Share Button */}
-        <div className="flex flex-col items-center gap-1">
+        <div className="flex flex-col items-center gap-0.5">
           <button
             type="button"
             onClick={handleShare}
             aria-label="Share quiz via Telegram"
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-95"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-xs transition hover:bg-slate-50 active:scale-95"
           >
-            <Share2 className="h-5 w-5" />
+            <Share2 className="h-4 w-4" />
           </button>
-          <span className="text-[11px] font-semibold text-slate-600">
+          <span className="text-[10px] font-semibold text-slate-600">
             Share
           </span>
         </div>
 
         {/* Flag Wrong Answer Button */}
-        <div className="flex flex-col items-center gap-1">
+        <div className="flex flex-col items-center gap-0.5">
           <button
             type="button"
             onClick={() => !flagged && setShowFlagSheet(true)}
             disabled={flagged}
             title={flagged ? 'Already flagged' : 'Flag Wrong Answer'}
             aria-label="Flag wrong answer"
-            className={`flex h-11 w-11 items-center justify-center rounded-full border shadow-sm transition active:scale-95 ${
+            className={`flex h-9 w-9 items-center justify-center rounded-full border shadow-xs transition active:scale-95 ${
               flagged
                 ? 'border-rose-200 bg-rose-50 text-rose-600'
                 : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
             }`}
           >
-            <Flag className={`h-5 w-5 ${flagged ? 'fill-rose-500/20' : ''}`} />
+            <Flag className={`h-4 w-4 ${flagged ? 'fill-rose-500/20' : ''}`} />
           </button>
           <span
-            className={`text-[11px] font-semibold ${
+            className={`text-[10px] font-semibold ${
               flagged ? 'text-rose-600' : 'text-slate-600'
             }`}
           >
@@ -497,55 +524,50 @@ export default function QuizCard({
         </div>
       </aside>
 
-      {/* Bottom-Left Creator + Follow Bar (Instagram Reels Style) */}
-      <div className="flex items-center justify-between gap-2 border-t border-slate-200/80 pt-3 pr-14">
-        <div className="flex min-w-0 items-center gap-2.5">
+      {/* Slim Bottom-Left Creator + Follow Bar */}
+      <div className="mt-1.5 flex shrink-0 items-center justify-between gap-2 border-t border-slate-200/70 pt-2 pr-12">
+        <div className="flex min-w-0 items-center gap-2">
           <button
             type="button"
             onClick={() => creatorId && onOpenCreatorProfile?.(creatorId)}
             aria-label={`View ${creatorHandle} profile`}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white shadow-xs transition hover:bg-slate-800 active:scale-95"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[11px] font-bold text-white shadow-2xs transition hover:bg-slate-800 active:scale-95"
           >
             {creatorInitial}
           </button>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => creatorId && onOpenCreatorProfile?.(creatorId)}
-                className="truncate text-xs font-bold text-slate-900 hover:underline"
-              >
-                {creatorHandle}
-              </button>
-              {creatorId && (
-                <button
-                  type="button"
-                  onClick={handleFollow}
-                  className={`inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-[11px] font-bold transition active:scale-95 ${
-                    following
-                      ? 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-                      : 'bg-slate-900 text-white shadow-xs hover:bg-slate-800'
-                  }`}
-                >
-                  {following ? (
-                    <>
-                      <UserCheck className="h-3 w-3" />
-                      <span>Following</span>
-                    </>
-                  ) : (
-                    <>
-                      <UserPlus className="h-3 w-3" />
-                      <span>Follow</span>
-                    </>
-                  )}
-                </button>
+          <button
+            type="button"
+            onClick={() => creatorId && onOpenCreatorProfile?.(creatorId)}
+            className="truncate text-xs font-bold text-slate-900 hover:underline"
+          >
+            {creatorHandle}
+          </button>
+          {creatorId && (
+            <button
+              type="button"
+              onClick={handleFollow}
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold transition active:scale-95 ${
+                following
+                  ? 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                  : 'bg-slate-900 text-white shadow-2xs hover:bg-slate-800'
+              }`}
+            >
+              {following ? (
+                <>
+                  <UserCheck className="h-2.5 w-2.5" />
+                  <span>Following</span>
+                </>
+              ) : (
+                <>
+                  <UserPlus className="h-2.5 w-2.5" />
+                  <span>Follow</span>
+                </>
               )}
-            </div>
-            <p className="text-[11px] font-medium text-slate-500">
-              {quiz.attemptsCount || 0} attempts
-              {flagCount > 0 ? ` · ${flagCount} flags` : ''}
-            </p>
-          </div>
+            </button>
+          )}
+          <span className="ml-auto shrink-0 text-[10px] font-medium text-slate-400">
+            {quiz.attemptsCount || 0} tries
+          </span>
         </div>
       </div>
 

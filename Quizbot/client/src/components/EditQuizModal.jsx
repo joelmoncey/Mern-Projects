@@ -121,12 +121,12 @@ export default function EditQuizModal({ quiz, onClose, onSaved }) {
                 Question (supports $...$ Maths)
               </label>
               <span className="text-[11px] text-slate-400">
-                {question.length}/600
+                {question.length}/3000
               </span>
             </div>
             <textarea
-              rows={3}
-              maxLength={600}
+              rows={4}
+              maxLength={3000}
               required
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
@@ -274,12 +274,12 @@ export default function EditQuizModal({ quiz, onClose, onSaved }) {
                 Explanation
               </label>
               <span className="text-[11px] text-slate-400">
-                {explanation.length}/800
+                {explanation.length}/2000
               </span>
             </div>
             <textarea
               rows={3}
-              maxLength={800}
+              maxLength={2000}
               value={explanation}
               onChange={(e) => setExplanation(e.target.value)}
               className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-900 focus:bg-white"

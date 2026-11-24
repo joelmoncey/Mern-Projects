@@ -31,8 +31,8 @@ export function validateMockQuestionItem(rawItem = {}) {
   if (!question || typeof question !== 'string' || !question.trim()) {
     return { error: 'Question text is required' };
   }
-  if (question.trim().length > 600) {
-    return { error: 'Question must be 600 characters or fewer' };
+  if (question.trim().length > 3000) {
+    return { error: 'Question must be 3000 characters or fewer' };
   }
   if (
     !Array.isArray(options) ||
@@ -52,8 +52,8 @@ export function validateMockQuestionItem(rawItem = {}) {
   }
 
   const trimmedExplanation = String(explanation || '').trim();
-  if (trimmedExplanation.length > 800) {
-    return { error: 'Explanation must be 800 characters or fewer' };
+  if (trimmedExplanation.length > 2000) {
+    return { error: 'Explanation must be 2000 characters or fewer' };
   }
 
   const visual = validateAndSanitizeVisual({ visualType, visualData });
@@ -826,6 +826,365 @@ export async function deleteMockTest(req, res, next) {
     ]);
 
     return res.status(200).json({ deleted: true, _id: mockTest._id });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * GET /api/mock-tests/:id/manage
+ * Returns the full Mock Test WITH answer keys, explanations, and visual payloads
+ * so the creator (or admin) can edit everything in the mock test.
+ */
+export async function getMockTestForEdit(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ error: 'Invalid mock test id' });
+    }
+
+    const mockTest = await MockTest.findById(id)
+      .populate('creator', 'firstName username photoUrl isSupporter')
+      .populate(
+        'hashtag',
+        'examName subExams subExamName languages subjectName subSubjectName subTopicName tag'
+      )
+      .lean();
+
+    if (!mockTest) {
+      return res.status(404).json({ error: 'Mock test not found' });
+    }
+
+    const creatorId = mockTest.creator?._id
+      ? String(mockTest.creator._id)
+      : String(mockTest.creator);
+    const isCreator = creatorId === String(req.user._id);
+    const isAdmin = req.user.role === 'admin';
+    if (!isCreator && !isAdmin) {
+      return res.status(403).json({
+        error: 'Only the mock test creator or an admin can edit this mock test',
+      });
+    }
+
+    const quizIds = (mockTest.questions || []).map((q) => q.quiz);
+    const quizDocs = await Quiz.find({ _id: { $in: quizIds } }).lean();
+    const quizMap = new Map(quizDocs.map((q) => [String(q._id), q]));
+
+    const orderedQuestions = (mockTest.questions || [])
+      .map((ref) => quizMap.get(String(ref.quiz)))
+      .filter(Boolean)
+      .map((q) => ({
+        _id: q._id,
+        question: q.question,
+        visualType: q.visualType || 'none',
+        visualData: q.visualData || '',
+        options: q.options,
+        correctIndex: q.correctIndex,
+        explanation: q.explanation || '',
+        questionHash: q.questionHash,
+      }));
+
+    return res.status(200).json({
+      mockTest: {
+        _id: mockTest._id,
+        title: mockTest.title,
+        description: mockTest.description || '',
+        durationMinutes: mockTest.durationMinutes,
+        negativeMarking: mockTest.negativeMarking || 0,
+        hashtagId: mockTest.hashtag?._id || mockTest.hashtag,
+        hashtag: mockTest.hashtag,
+        examName: mockTest.examName,
+        subExams: mockTest.subExams || [],
+        language: mockTest.language || 'English',
+        subjectName: mockTest.subjectName,
+        subSubjectName: mockTest.subSubjectName || '',
+        subTopicName: mockTest.subTopicName || '',
+        questionCount: orderedQuestions.length,
+        attemptsCount: mockTest.attemptsCount || 0,
+      },
+      questions: orderedQuestions,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * PATCH /api/mock-tests/:id
+ * Allows the creator (or admin) to edit everything in a Mock Test:
+ * - title, description, durationMinutes, negativeMarking
+ * - exam tag / hashtagId & language
+ * - editing existing questions (syncing fixes to Quiz docs), reordering, removing,
+ *   and adding brand-new questions (via single add or appended .txt batch).
+ */
+export async function updateMockTest(req, res, next) {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ error: 'Invalid mock test id' });
+    }
+
+    const mockTest = await MockTest.findById(id);
+    if (!mockTest) {
+      return res.status(404).json({ error: 'Mock test not found' });
+    }
+
+    const isCreator = String(mockTest.creator) === String(req.user._id);
+    const isAdmin = req.user.role === 'admin';
+    if (!isCreator && !isAdmin) {
+      return res.status(403).json({
+        error: 'Only the mock test creator or an admin can edit this mock test',
+      });
+    }
+
+    const {
+      title,
+      description,
+      durationMinutes,
+      negativeMarking,
+      hashtagId,
+      language,
+      questions,
+    } = req.body || {};
+
+    if (title !== undefined) {
+      const cleanTitle = String(title || '').trim();
+      if (cleanTitle.length < 3 || cleanTitle.length > 120) {
+        return res.status(400).json({
+          error: 'Mock test title must be between 3 and 120 characters',
+        });
+      }
+      mockTest.title = cleanTitle;
+    }
+
+    if (description !== undefined) {
+      mockTest.description = String(description || '').trim().slice(0, 300);
+    }
+
+    if (durationMinutes !== undefined) {
+      const parsedDuration = Number(durationMinutes);
+      if (
+        !Number.isInteger(parsedDuration) ||
+        parsedDuration < 1 ||
+        parsedDuration > 240
+      ) {
+        return res.status(400).json({
+          error: 'Timer duration must be a whole number between 1 and 240 minutes',
+        });
+      }
+      mockTest.durationMinutes = parsedDuration;
+    }
+
+    if (negativeMarking !== undefined) {
+      const parsedNeg = Number(negativeMarking) || 0;
+      if (Number.isNaN(parsedNeg) || parsedNeg < 0 || parsedNeg > 1) {
+        return res
+          .status(400)
+          .json({ error: 'Negative marking must be between 0 and 1' });
+      }
+      mockTest.negativeMarking = parsedNeg;
+    }
+
+    let targetHashtag = await Hashtag.findById(mockTest.hashtag);
+    if (hashtagId && mongoose.isValidObjectId(hashtagId)) {
+      const nextTag = await Hashtag.findById(hashtagId);
+      if (!nextTag || !nextTag.isActive) {
+        return res
+          .status(400)
+          .json({ error: 'Selected exam tag is invalid or inactive' });
+      }
+      targetHashtag = nextTag;
+      const nextSubExams =
+        Array.isArray(nextTag.subExams) && nextTag.subExams.length > 0
+          ? nextTag.subExams
+          : (nextTag.subExamName || '')
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean);
+
+      mockTest.hashtag = nextTag._id;
+      mockTest.examName = nextTag.examName;
+      mockTest.subExams = nextSubExams;
+      mockTest.subExamName = nextSubExams.join(', ');
+      mockTest.subjectName = nextTag.subjectName;
+      mockTest.subSubjectName = nextTag.subSubjectName || '';
+      mockTest.subTopicName = nextTag.subTopicName || '';
+    }
+
+    if (language !== undefined && String(language).trim()) {
+      const allowedLangs =
+        Array.isArray(targetHashtag?.languages) &&
+        targetHashtag.languages.length > 0
+          ? targetHashtag.languages
+          : ['English'];
+      const reqLang = String(language).trim();
+      const matched = allowedLangs.find(
+        (l) => l.toLowerCase() === reqLang.toLowerCase()
+      );
+      if (!matched) {
+        return res.status(400).json({
+          error: `Language "${reqLang}" is not enabled for this topic. Allowed: ${allowedLangs.join(', ')}`,
+        });
+      }
+      mockTest.language = matched;
+    }
+
+    let newlyCreatedFeedQuizzes = 0;
+
+    if (Array.isArray(questions)) {
+      if (questions.length === 0 || questions.length > 200) {
+        return res.status(400).json({
+          error: 'A mock test must have between 1 and 200 questions',
+        });
+      }
+
+      const orderedRefs = [];
+      const seenHashesInMock = new Set();
+      const now = new Date();
+
+      for (let i = 0; i < questions.length; i += 1) {
+        const rawItem = questions[i] || {};
+        const validated = validateMockQuestionItem(rawItem);
+        if (validated.error) {
+          return res.status(400).json({
+            error: `Question #${i + 1}: ${validated.error}`,
+          });
+        }
+
+        if (seenHashesInMock.has(validated.questionHash)) {
+          continue;
+        }
+        seenHashesInMock.add(validated.questionHash);
+
+        let resolvedQuizId = null;
+
+        // If editing an existing Quiz linked in this Mock Test
+        if (rawItem._id && mongoose.isValidObjectId(rawItem._id)) {
+          const existingQuiz = await Quiz.findById(rawItem._id);
+          if (
+            existingQuiz &&
+            (String(existingQuiz.creator) === String(mockTest.creator) ||
+              isAdmin)
+          ) {
+            // Check if changing the question collides with another existing quiz by same creator
+            const hashCollision = await Quiz.findOne({
+              _id: { $ne: existingQuiz._id },
+              creator: existingQuiz.creator,
+              examName: mockTest.examName,
+              language: mockTest.language,
+              questionHash: validated.questionHash,
+            })
+              .select('_id')
+              .lean();
+
+            if (hashCollision) {
+              resolvedQuizId = hashCollision._id;
+            } else {
+              existingQuiz.hashtag = mockTest.hashtag;
+              existingQuiz.examName = mockTest.examName;
+              existingQuiz.subExams = mockTest.subExams || [];
+              existingQuiz.subExamName = (mockTest.subExams || []).join(', ');
+              existingQuiz.language = mockTest.language;
+              existingQuiz.subjectName = mockTest.subjectName;
+              existingQuiz.subSubjectName = mockTest.subSubjectName || '';
+              existingQuiz.subTopicName = mockTest.subTopicName || '';
+              existingQuiz.question = validated.question;
+              existingQuiz.visualType = validated.visualType;
+              existingQuiz.visualData = validated.visualData;
+              existingQuiz.normalizedQuestion = validated.normalizedQuestion;
+              existingQuiz.questionHash = validated.questionHash;
+              existingQuiz.options = validated.options;
+              existingQuiz.correctIndex = validated.correctIndex;
+              existingQuiz.explanation = validated.explanation;
+              existingQuiz.editCount = (existingQuiz.editCount || 0) + 1;
+              existingQuiz.lastEditedAt = now;
+              await existingQuiz.save();
+              resolvedQuizId = existingQuiz._id;
+            }
+          }
+        }
+
+        // If brand-new question added inside editor (or no existing doc found)
+        if (!resolvedQuizId) {
+          const existingSameHash = await Quiz.findOne({
+            creator: mockTest.creator,
+            examName: mockTest.examName,
+            language: mockTest.language,
+            questionHash: validated.questionHash,
+          })
+            .select('_id')
+            .lean();
+
+          if (existingSameHash) {
+            resolvedQuizId = existingSameHash._id;
+          } else {
+            const createdQuiz = await Quiz.create({
+              creator: mockTest.creator,
+              hashtag: mockTest.hashtag,
+              examName: mockTest.examName,
+              subExams: mockTest.subExams || [],
+              subExamName: (mockTest.subExams || []).join(', '),
+              language: mockTest.language,
+              subjectName: mockTest.subjectName,
+              subSubjectName: mockTest.subSubjectName || '',
+              subTopicName: mockTest.subTopicName || '',
+              question: validated.question,
+              visualType: validated.visualType,
+              visualData: validated.visualData,
+              normalizedQuestion: validated.normalizedQuestion,
+              questionHash: validated.questionHash,
+              options: validated.options,
+              correctIndex: validated.correctIndex,
+              explanation: validated.explanation,
+            });
+            resolvedQuizId = createdQuiz._id;
+            newlyCreatedFeedQuizzes += 1;
+          }
+        }
+
+        orderedRefs.push({
+          quiz: resolvedQuizId,
+          questionHash: validated.questionHash,
+        });
+      }
+
+      if (orderedRefs.length === 0) {
+        return res
+          .status(400)
+          .json({ error: 'At least 1 unique question is required' });
+      }
+
+      mockTest.questions = orderedRefs;
+      mockTest.questionCount = orderedRefs.length;
+
+      if (newlyCreatedFeedQuizzes > 0) {
+        await Hashtag.updateOne(
+          { _id: mockTest.hashtag },
+          { $inc: { quizCount: newlyCreatedFeedQuizzes } }
+        );
+        invalidateHashtagsCache();
+        invalidateLeaderboardCache();
+      }
+    }
+
+    await mockTest.save();
+
+    await mockTest.populate([
+      { path: 'creator', select: 'firstName username photoUrl isSupporter' },
+      {
+        path: 'hashtag',
+        select:
+          'examName subExams subExamName languages subjectName subSubjectName subTopicName tag',
+      },
+    ]);
+
+    return res.status(200).json({
+      mockTest: {
+        ...mockTest.toObject(),
+        canManage: true,
+      },
+      newlyCreatedFeedQuizzes,
+    });
   } catch (error) {
     return next(error);
   }

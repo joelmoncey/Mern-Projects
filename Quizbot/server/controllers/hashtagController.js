@@ -67,7 +67,7 @@ export async function getHashtags(req, res, next) {
       ? CACHE_KEYS.HASHTAGS_ALL
       : CACHE_KEYS.HASHTAGS_ACTIVE;
 
-    const cached = getCache(cacheKey);
+    const cached = await getCache(cacheKey);
     if (cached) {
       return res.status(200).json(cached);
     }
@@ -151,7 +151,7 @@ export async function getHashtags(req, res, next) {
       hashtags,
     };
 
-    setCache(cacheKey, payload, HASHTAGS_TTL_SECONDS);
+    await setCache(cacheKey, payload, HASHTAGS_TTL_SECONDS);
 
     return res.status(200).json(payload);
   } catch (error) {

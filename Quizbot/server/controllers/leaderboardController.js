@@ -10,7 +10,7 @@ export async function getLeaderboard(req, res, next) {
     const type = req.query.type === 'creators' ? 'creators' : 'solvers';
     const cacheKey = `${CACHE_KEYS.LEADERBOARD_PREFIX}${type}`;
 
-    const cached = getCache(cacheKey);
+    const cached = await getCache(cacheKey);
     if (cached) {
       return res.status(200).json(cached);
     }
@@ -82,7 +82,7 @@ export async function getLeaderboard(req, res, next) {
         periodDays: 7,
         entries,
       };
-      setCache(cacheKey, payload, LEADERBOARD_TTL_SECONDS);
+      await setCache(cacheKey, payload, LEADERBOARD_TTL_SECONDS);
       return res.status(200).json(payload);
     }
 
@@ -197,7 +197,7 @@ export async function getLeaderboard(req, res, next) {
       periodDays: 7,
       entries,
     };
-    setCache(cacheKey, payload, LEADERBOARD_TTL_SECONDS);
+    await setCache(cacheKey, payload, LEADERBOARD_TTL_SECONDS);
     return res.status(200).json(payload);
   } catch (error) {
     return next(error);

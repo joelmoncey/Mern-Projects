@@ -7,9 +7,15 @@ import Attempt from '../models/Attempt.js';
 import { computeQuestionHash } from '../utils/questionHash.js';
 import { validateAndSanitizeVisual } from '../utils/quizVisuals.js';
 import {
+  CACHE_KEYS,
+  getCache,
+  setCache,
   invalidateHashtagsCache,
   invalidateLeaderboardCache,
+  invalidateMockTestsCache,
 } from '../utils/cache.js';
+
+const MOCK_TESTS_TTL_SECONDS = 60;
 
 function getUtcDayStart(date) {
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
@@ -401,6 +407,8 @@ export async function createMockTest(req, res, next) {
       },
     ]);
 
+    invalidateMockTestsCache();
+
     return res.status(201).json({
       mockTest,
       questionCount: orderedRefs.length,
@@ -512,16 +520,31 @@ export async function listMockTests(req, res, next) {
       query.creator = creatorId.trim();
     }
 
-    const tests = await MockTest.find(query)
-      .sort({ createdAt: -1 })
-      .limit(60)
-      .select('-questions')
-      .populate('creator', 'firstName username photoUrl isSupporter')
-      .populate(
-        'hashtag',
-        'examName subExams subExamName languages subjectName subSubjectName subTopicName tag'
-      )
-      .lean();
+    const filterCacheKey = `${CACHE_KEYS.MOCK_TESTS_PREFIX}${JSON.stringify({
+      examName: examName || '',
+      subExams: rawSubExamParam || '',
+      language: language || '',
+      subjectName: subjectName || '',
+      subSubjectName: subSubjectName || '',
+      subTopicName: subTopicName || '',
+      hashtag: hashtag || '',
+      creatorId: creatorId || '',
+    })}`;
+
+    let tests = await getCache(filterCacheKey);
+    if (!tests) {
+      tests = await MockTest.find(query)
+        .sort({ createdAt: -1 })
+        .limit(60)
+        .select('-questions')
+        .populate('creator', 'firstName username photoUrl isSupporter')
+        .populate(
+          'hashtag',
+          'examName subExams subExamName languages subjectName subSubjectName subTopicName tag'
+        )
+        .lean();
+      await setCache(filterCacheKey, tests, MOCK_TESTS_TTL_SECONDS);
+    }
 
     // Annotate with the current user's best & latest attempt for each mock test
     const userBestByMockId = new Map();
@@ -768,6 +791,7 @@ export async function submitMockTest(req, res, next) {
 
       invalidateLeaderboardCache();
     }
+    invalidateMockTestsCache();
 
     return res.status(200).json({
       attemptId: mockAttempt._id,
@@ -824,6 +848,8 @@ export async function deleteMockTest(req, res, next) {
       MockTest.deleteOne({ _id: mockTest._id }),
       MockAttempt.deleteMany({ mockTest: mockTest._id }),
     ]);
+
+    invalidateMockTestsCache();
 
     return res.status(200).json({ deleted: true, _id: mockTest._id });
   } catch (error) {
@@ -1168,6 +1194,7 @@ export async function updateMockTest(req, res, next) {
     }
 
     await mockTest.save();
+    invalidateMockTestsCache();
 
     await mockTest.populate([
       { path: 'creator', select: 'firstName username photoUrl isSupporter' },

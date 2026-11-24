@@ -618,10 +618,10 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
           {error && (
             <div
               role="alert"
-              className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-xs font-medium text-rose-800"
+              className="flex min-w-0 items-start gap-2 overflow-hidden rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-xs font-medium text-rose-800"
             >
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
-              <span>{error}</span>
+              <span className="min-w-0 break-words">{error}</span>
             </div>
           )}
 

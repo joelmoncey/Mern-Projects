@@ -77,14 +77,18 @@ function AppShell() {
   if (authMode === 'error') {
     return (
       <main className="mx-auto flex h-dvh max-w-md flex-col items-center justify-center gap-3 bg-[#F8FAFC] px-6 text-center">
-        <p className="text-sm font-bold text-slate-900">Authentication Failed</p>
-        <p className="text-xs text-slate-500">{error}</p>
+        <p className="text-sm font-bold text-slate-900">
+          Connection Interrupted
+        </p>
+        <p className="max-w-xs text-xs leading-relaxed text-slate-500">
+          {error || 'Unable to reach Quiz-Gram server right now.'}
+        </p>
         <button
           type="button"
           onClick={reauthenticate}
-          className="rounded-full bg-slate-900 px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-slate-800"
+          className="rounded-full bg-slate-900 px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-slate-800 active:scale-95"
         >
-          Try Again
+          Retry Connection
         </button>
       </main>
     );

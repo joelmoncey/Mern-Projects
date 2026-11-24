@@ -76,6 +76,16 @@ export function AuthProvider({ children }) {
     authenticate();
   }, [authenticate]);
 
+  // Auto-recover if the phone regains internet while stuck on an error state
+  useEffect(() => {
+    if (authMode !== 'error') return;
+    const handleOnline = () => {
+      authenticate();
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [authMode, authenticate]);
+
   const updateUserStats = useCallback((userStats) => {
     if (!userStats) return;
     setUser((prev) =>

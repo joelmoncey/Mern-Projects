@@ -36,6 +36,9 @@ function getAllowedOrigins() {
 }
 
 const allowedOrigins = getAllowedOrigins();
+const hasVercelOrigin =
+  Array.isArray(allowedOrigins) &&
+  allowedOrigins.some((o) => o.toLowerCase().endsWith('.vercel.app'));
 
 app.use(
   cors({
@@ -44,6 +47,12 @@ app.use(
         return callback(null, true);
       }
       const normalized = origin.replace(/\/+$/, '');
+      if (
+        hasVercelOrigin &&
+        /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(normalized)
+      ) {
+        return callback(null, true);
+      }
       const isAllowed = allowedOrigins.some((allowed) => {
         if (!allowed.includes('*')) return allowed === normalized;
         // Wildcard support, e.g. https://*.vercel.app
@@ -56,9 +65,10 @@ app.use(
       if (isAllowed) {
         return callback(null, true);
       }
-      return callback(new Error(`Origin ${origin} not allowed by CORS`));
+      return callback(null, false);
     },
     credentials: true,
+    maxAge: 86400, // Cache CORS preflight for 24h to avoid extra OPTIONS round-trips on mobile
   })
 );
 app.use(express.json({ limit: '2mb' }));

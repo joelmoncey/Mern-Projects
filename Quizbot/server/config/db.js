@@ -74,6 +74,30 @@ async function resolveSrvUriViaDoH(srvUri) {
   return `mongodb://${auth}${srvAnswers.join(',')}${dbPath}?${params.toString()}`;
 }
 
+async function dropLegacyQuizIndexes(conn) {
+  try {
+    const db = conn?.connection?.db;
+    if (!db) return;
+    const collections = await db
+      .listCollections({ name: 'quizzes' })
+      .toArray();
+    if (collections.length === 0) return;
+
+    const quizzesCol = db.collection('quizzes');
+    const indexes = await quizzesCol.indexes();
+    const legacyNames = ['creator_1_questionHash_1', 'creator_1_examName_1_questionHash_1'];
+
+    for (const idx of indexes) {
+      if (legacyNames.includes(idx.name)) {
+        await quizzesCol.dropIndex(idx.name);
+        console.log(`[db] Dropped stale legacy unique index: ${idx.name}`);
+      }
+    }
+  } catch (err) {
+    console.warn('[db] Legacy index check skipped:', err.message);
+  }
+}
+
 export async function connectDB() {
   const uri = process.env.MONGO_URI;
 
@@ -92,6 +116,7 @@ export async function connectDB() {
   try {
     const conn = await mongoose.connect(uri, connectOptions);
     console.log(`[db] MongoDB connected: ${conn.connection.host}`);
+    await dropLegacyQuizIndexes(conn);
     return conn;
   } catch (error) {
     if (
@@ -104,6 +129,7 @@ export async function connectDB() {
       const standardUri = await resolveSrvUriViaDoH(uri);
       const conn = await mongoose.connect(standardUri, connectOptions);
       console.log(`[db] MongoDB connected: ${conn.connection.host}`);
+      await dropLegacyQuizIndexes(conn);
       return conn;
     }
 

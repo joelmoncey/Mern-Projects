@@ -232,7 +232,10 @@ export default function QuizCard({
       : null;
 
   const questionLen = (quiz.question || '').length;
-  const isLongPassage = questionLen > 320;
+  const hasVisual = Boolean(
+    quiz.visualType && quiz.visualType !== 'none' && quiz.visualData
+  );
+  const isLongPassage = questionLen > 260;
   const questionSizeClass =
     questionLen > 320
       ? 'text-[13px] leading-relaxed font-semibold'
@@ -313,14 +316,14 @@ export default function QuizCard({
         )}
       </div>
 
-      {/* Main Scroll-Safe Question + 4 Option Cards (All 4 options always visible & reachable) */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pr-12 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="my-auto flex flex-col gap-2 py-1">
+      {/* Main Question + 4 Option Cards (NO outer scroll trap so vertical swipe snaps cleanly to next question!) */}
+      <div className="flex min-h-0 flex-1 flex-col justify-center pr-12">
+        <div className="flex flex-col gap-2 py-1">
           <div className="rounded-2xl border border-slate-200/90 bg-white p-3.5 shadow-2xs">
             <div
               className={
-                isLongPassage
-                  ? 'max-h-[34dvh] overflow-y-auto overscroll-contain pr-1'
+                isLongPassage || hasVisual
+                  ? 'max-h-[30dvh] overflow-y-auto pr-1'
                   : ''
               }
             >
@@ -416,7 +419,7 @@ export default function QuizCard({
           {/* Matching Green / Red Explanation Box */}
           {isAnswered && showExplanation && (
             <div
-              className={`rounded-xl border p-3 text-xs leading-relaxed shadow-2xs ${
+              className={`max-h-[16dvh] overflow-y-auto rounded-xl border p-2.5 text-xs leading-relaxed shadow-2xs ${
                 attemptResult.isCorrect
                   ? 'border-emerald-200 bg-emerald-50/90 text-emerald-950'
                   : 'border-rose-200 bg-rose-50/90 text-rose-950'

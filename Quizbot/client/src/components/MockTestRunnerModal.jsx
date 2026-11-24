@@ -579,7 +579,7 @@ export default function MockTestRunnerModal({
               <div
                 className={
                   (currentQuestion.question || '').length > 350
-                    ? 'max-h-[38dvh] overflow-y-auto overscroll-contain pr-1'
+                    ? 'max-h-[38dvh] overflow-y-auto pr-1'
                     : ''
                 }
               >

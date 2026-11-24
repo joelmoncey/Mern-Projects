@@ -5,7 +5,9 @@ import {
   Check,
   CheckCircle2,
   ChevronRight,
+  Clock,
   Copy,
+  Download,
   FileText,
   Layers,
   Loader2,
@@ -13,6 +15,7 @@ import {
   MessageCircle,
   Send,
   Sparkles,
+  Timer,
   Upload,
 } from 'lucide-react';
 import { apiRequest } from '../lib/api.js';
@@ -23,6 +26,7 @@ import {
 import { extractSubExamsArray } from '../lib/sscTaxonomyPreset.js';
 import { openAdminContactLink } from '../lib/telegram.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import { MathText, QuizVisualBlock } from '../components/QuizRichContent.jsx';
 
 export function formatHierarchyPath(item) {
   if (!item) return '';
@@ -51,7 +55,7 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
   const { user, isOfflinePreview } = useAuth();
   const canCreate = user?.role === 'admin' || Boolean(user?.canCreateQuiz);
 
-  // Mode toggle: 'single' (One by One) | 'bulk' (Bulk Format Paste / Upload)
+  // Mode toggle: 'single' (One by One) | 'bulk' (Bulk .txt) | 'mock' (Timed Mock Test .txt)
   const [createMode, setCreateMode] = useState('single');
 
   const [groupedByExam, setGroupedByExam] = useState({});
@@ -68,14 +72,22 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
 
   // Single Quiz state
   const [question, setQuestion] = useState('');
+  const [visualType, setVisualType] = useState('none');
+  const [visualData, setVisualData] = useState('');
   const [options, setOptions] = useState(['', '', '', '']);
   const [correctIndex, setCorrectIndex] = useState(null);
   const [explanation, setExplanation] = useState('');
 
-  // Bulk Quiz state
+  // Bulk & Mock Test (.txt) state
   const [bulkText, setBulkText] = useState('');
   const [copiedTemplate, setCopiedTemplate] = useState(false);
   const fileInputRef = useRef(null);
+
+  // Mock Test specific settings
+  const [mockTitle, setMockTitle] = useState('');
+  const [mockDurationMinutes, setMockDurationMinutes] = useState(15);
+  const [mockNegativeMarking, setMockNegativeMarking] = useState(0);
+  const [mockDescription, setMockDescription] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -327,6 +339,22 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
     }
   }
 
+  function handleDownloadSampleTxt() {
+    try {
+      const blob = new Blob([BULK_QUIZ_TEMPLATE], {
+        type: 'text/plain;charset=utf-8',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'quiz-gram-bulk-template.txt';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setBulkText(BULK_QUIZ_TEMPLATE);
+    }
+  }
+
   function handleFileUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -381,6 +409,8 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
           hashtagId: selectedHashtagId,
           language: selectedLanguage,
           question: question.trim(),
+          visualType: visualData.trim() ? visualType : 'none',
+          visualData: visualType === 'none' ? '' : visualData.trim(),
           options: options.map((o) => o.trim()),
           correctIndex: Number(correctIndex),
           explanation: explanation.trim(),
@@ -388,6 +418,8 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
       });
 
       setQuestion('');
+      setVisualType('none');
+      setVisualData('');
       setOptions(['', '', '', '']);
       setCorrectIndex(null);
       setExplanation('');
@@ -405,14 +437,27 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
     setError('');
     setSuccessMessage('');
 
+    const isMockMode = createMode === 'mock';
+
     if (!selectedHashtagId) {
       setError('Please select an official exam topic first.');
       return;
     }
+    if (isMockMode) {
+      if (!mockTitle.trim() || mockTitle.trim().length < 3) {
+        setError('Please enter a Mock Test Title (at least 3 characters).');
+        return;
+      }
+      const mins = Number(mockDurationMinutes);
+      if (!Number.isInteger(mins) || mins < 1 || mins > 240) {
+        setError('Please set a valid timer between 1 and 240 minutes.');
+        return;
+      }
+    }
     if (bulkParsed.quizzes.length === 0) {
       setError(
         bulkParsed.errors[0]?.reason ||
-          'Paste at least 1 valid quiz in the required format before publishing.'
+          'Upload a .txt file or paste at least 1 valid quiz before publishing.'
       );
       return;
     }
@@ -430,25 +475,55 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
 
     setSubmitting(true);
     try {
-      const data = await apiRequest('/api/quizzes/bulk', {
-        method: 'POST',
-        body: {
-          hashtagId: selectedHashtagId,
-          language: selectedLanguage,
-          quizzes: bulkParsed.quizzes,
-        },
-      });
+      if (isMockMode) {
+        const data = await apiRequest('/api/mock-tests', {
+          method: 'POST',
+          body: {
+            hashtagId: selectedHashtagId,
+            language: selectedLanguage,
+            title: mockTitle.trim(),
+            description: mockDescription.trim(),
+            durationMinutes: Number(mockDurationMinutes),
+            negativeMarking: Number(mockNegativeMarking) || 0,
+            quizzes: bulkParsed.quizzes,
+          },
+        });
+        setBulkText('');
+        setMockTitle('');
+        setMockDescription('');
+        const reusedNote =
+          data.reusedQuestionsCount > 0
+            ? `, ${data.reusedQuestionsCount} reused from your bank`
+            : '';
+        setSuccessMessage(
+          `Mock Test "${data.mockTest?.title}" published (${data.questionCount} Qs, ${data.mockTest?.durationMinutes} min timer · ${data.newFeedQuizzesCount} new added to Feed${reusedNote})!`
+        );
+      } else {
+        const data = await apiRequest('/api/quizzes/bulk', {
+          method: 'POST',
+          body: {
+            hashtagId: selectedHashtagId,
+            language: selectedLanguage,
+            quizzes: bulkParsed.quizzes,
+          },
+        });
 
-      setBulkText('');
-      const dupNote =
-        data.skippedDuplicatesCount > 0
-          ? ` (${data.skippedDuplicatesCount} duplicate(s) skipped)`
-          : '';
-      setSuccessMessage(
-        `Published ${data.createdCount} quiz(zes) to the feed!${dupNote}`
-      );
+        setBulkText('');
+        const dupNote =
+          data.skippedDuplicatesCount > 0
+            ? ` (${data.skippedDuplicatesCount} duplicate(s) skipped)`
+            : '';
+        setSuccessMessage(
+          `Published ${data.createdCount} quiz(zes) to the feed!${dupNote}`
+        );
+      }
     } catch (err) {
-      setError(err.message || 'Could not publish bulk quizzes');
+      setError(
+        err.message ||
+          (isMockMode
+            ? 'Could not publish mock test'
+            : 'Could not publish bulk quizzes')
+      );
     } finally {
       setSubmitting(false);
     }
@@ -476,8 +551,8 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
         </button>
       </div>
 
-      {/* Mode Switcher: One by One vs Bulk Add */}
-      <div className="mb-4 grid grid-cols-2 gap-1.5 rounded-xl border border-slate-200 bg-slate-100 p-1">
+      {/* Mode Switcher: One by One | Bulk (.txt) | Mock Test (.txt) */}
+      <div className="mb-4 grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1">
         <button
           type="button"
           onClick={() => {
@@ -485,7 +560,7 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
             setError('');
             setSuccessMessage('');
           }}
-          className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-bold transition ${
+          className={`inline-flex items-center justify-center gap-1 rounded-lg py-2 text-[11px] font-bold transition ${
             createMode === 'single'
               ? 'bg-white text-slate-900 shadow-2xs'
               : 'text-slate-500 hover:text-slate-900'
@@ -501,14 +576,30 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
             setError('');
             setSuccessMessage('');
           }}
-          className={`inline-flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-bold transition ${
+          className={`inline-flex items-center justify-center gap-1 rounded-lg py-2 text-[11px] font-bold transition ${
             createMode === 'bulk'
               ? 'bg-white text-slate-900 shadow-2xs'
               : 'text-slate-500 hover:text-slate-900'
           }`}
         >
           <Layers className="h-3.5 w-3.5" />
-          <span>Bulk Add (Format)</span>
+          <span>Bulk (.txt)</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setCreateMode('mock');
+            setError('');
+            setSuccessMessage('');
+          }}
+          className={`inline-flex items-center justify-center gap-1 rounded-lg py-2 text-[11px] font-bold transition ${
+            createMode === 'mock'
+              ? 'bg-slate-900 text-white shadow-2xs'
+              : 'text-slate-500 hover:text-slate-900'
+          }`}
+        >
+          <Timer className="h-3.5 w-3.5" />
+          <span>Mock Test</span>
         </button>
       </div>
 
@@ -715,22 +806,81 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
                     htmlFor="quiz-question"
                     className="text-[11px] font-bold tracking-wider text-slate-500 uppercase"
                   >
-                    Question
+                    Question (supports $...$ Maths)
                   </label>
                   <span className="text-[11px] font-medium text-slate-400">
-                    {question.length}/300
+                    {question.length}/600
                   </span>
                 </div>
                 <textarea
                   id="quiz-question"
                   rows={3}
-                  maxLength={300}
+                  maxLength={600}
                   required
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
-                  placeholder="Write a crisp, exam-level question..."
+                  placeholder="Write a crisp exam question... Use $x^2 + 1$ for maths equations."
                   className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 shadow-2xs placeholder:text-slate-400 outline-none focus:border-slate-900"
                 />
+                {question.includes('$') && (
+                  <div className="mt-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-900">
+                    <span className="mr-1.5 text-[10px] font-bold text-slate-400 uppercase">
+                      Math Preview:
+                    </span>
+                    <MathText text={question} />
+                  </div>
+                )}
+              </div>
+
+              {/* Optional Visual Block (Box / Table / SVG Drawing / Image URL) */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-2xs">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <label className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
+                    Box / Table / Drawing (Optional)
+                  </label>
+                  <select
+                    value={visualType}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setVisualType(next);
+                      if (next === 'none') setVisualData('');
+                    }}
+                    className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-800 outline-none focus:border-slate-900"
+                  >
+                    <option value="none">No Visual</option>
+                    <option value="box">Missing-Number Box (|)</option>
+                    <option value="table">Match / Data Table (|)</option>
+                    <option value="svg">SVG Drawing (&lt;svg&gt;)</option>
+                    <option value="image">Image URL (https://)</option>
+                  </select>
+                </div>
+
+                {visualType !== 'none' && (
+                  <>
+                    <textarea
+                      rows={3}
+                      value={visualData}
+                      onChange={(e) => setVisualData(e.target.value)}
+                      placeholder={
+                        visualType === 'box'
+                          ? '4 | 9 | 2\n3 | 5 | 7\n8 | 1 | ?'
+                          : visualType === 'table'
+                            ? 'List-I | List-II\nHarappa | Ravi\nLothal | Bhogava'
+                            : visualType === 'svg'
+                              ? '<svg viewBox="0 0 180 120"><polygon points="90,18 30,104 150,104" fill="none" stroke="#0f172a" stroke-width="2"/></svg>'
+                              : 'https://example.com/diagram.png'
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900 focus:bg-white"
+                    />
+                    {visualData.trim() && (
+                      <QuizVisualBlock
+                        visualType={visualType}
+                        visualData={visualData}
+                        compact
+                      />
+                    )}
+                  </>
+                )}
               </div>
 
               <div>
@@ -838,13 +988,13 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
                     Explanation (optional)
                   </label>
                   <span className="text-[11px] font-medium text-slate-400">
-                    {explanation.length}/400
+                    {explanation.length}/800
                   </span>
                 </div>
                 <textarea
                   id="quiz-explanation"
                   rows={3}
-                  maxLength={400}
+                  maxLength={800}
                   value={explanation}
                   onChange={(e) => setExplanation(e.target.value)}
                   placeholder="Explain why the answer is right..."
@@ -866,8 +1016,129 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
               </button>
             </form>
           ) : (
-            /* MODE 2: BULK QUIZ ADDING WITH SPECIFIC FORMAT */
+            /* MODE 2 & 3: BULK (.txt) OR TIMED MOCK TEST (.txt) */
             <form onSubmit={handleBulkSubmit} className="flex flex-col gap-3.5">
+              {/* Mock Test Settings Card (shown only in Mock Test mode) */}
+              {createMode === 'mock' && (
+                <div className="flex flex-col gap-3 rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50/60 via-white to-white p-3.5 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold tracking-wider text-indigo-900 uppercase">
+                      <Timer className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>Timed Mock Test Details</span>
+                    </span>
+                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-800">
+                      Up to 200 Qs
+                    </span>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="mock-title"
+                      className="mb-1 block text-[10px] font-bold tracking-wider text-slate-500 uppercase"
+                    >
+                      Mock Test Title *
+                    </label>
+                    <input
+                      id="mock-title"
+                      type="text"
+                      required
+                      maxLength={120}
+                      value={mockTitle}
+                      onChange={(e) => setMockTitle(e.target.value)}
+                      placeholder="e.g. SSC CGL Full Quant Mock #1"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900"
+                    />
+                  </div>
+
+                  {/* Timer Picker */}
+                  <div>
+                    <div className="mb-1 flex items-center justify-between">
+                      <label
+                        htmlFor="mock-timer"
+                        className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wider text-slate-500 uppercase"
+                      >
+                        <Clock className="h-3 w-3" />
+                        <span>Timer Duration (Minutes) *</span>
+                      </label>
+                      <span className="text-[11px] font-extrabold text-indigo-700">
+                        {mockDurationMinutes} min
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[5, 10, 15, 30, 60].map((mins) => (
+                        <button
+                          key={mins}
+                          type="button"
+                          onClick={() => setMockDurationMinutes(mins)}
+                          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition active:scale-95 ${
+                            Number(mockDurationMinutes) === mins
+                              ? 'border-slate-900 bg-slate-900 text-white'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          {mins}m
+                        </button>
+                      ))}
+                      <input
+                        id="mock-timer"
+                        type="number"
+                        min={1}
+                        max={240}
+                        required
+                        value={mockDurationMinutes}
+                        onChange={(e) =>
+                          setMockDurationMinutes(
+                            Math.max(1, Math.min(240, Number(e.target.value) || 1))
+                          )
+                        }
+                        className="w-16 rounded-xl border border-slate-200 bg-white px-2 py-1 text-center text-xs font-bold text-slate-900 outline-none focus:border-slate-900"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Negative Marking Selector */}
+                  <div>
+                    <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+                      Negative Marking per Wrong Answer
+                    </label>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {[
+                        { label: 'None (0)', val: 0 },
+                        { label: '-0.25', val: 0.25 },
+                        { label: '-0.33', val: 0.33 },
+                        { label: '-0.50', val: 0.5 },
+                      ].map((opt) => (
+                        <button
+                          key={opt.val}
+                          type="button"
+                          onClick={() => setMockNegativeMarking(opt.val)}
+                          className={`rounded-lg border py-1.5 text-[11px] font-bold transition active:scale-95 ${
+                            Number(mockNegativeMarking) === opt.val
+                              ? 'border-slate-900 bg-slate-900 text-white'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <input
+                    type="text"
+                    maxLength={300}
+                    value={mockDescription}
+                    onChange={(e) => setMockDescription(e.target.value)}
+                    placeholder="Short instructions or syllabus note (optional)..."
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 outline-none focus:border-slate-900"
+                  />
+
+                  <p className="rounded-xl border border-emerald-200/80 bg-emerald-50/70 px-2.5 py-1.5 text-[10px] font-semibold text-emerald-900">
+                    ✓ Multiple mock tests allowed per tag &middot; Reused questions across your tests are linked automatically &middot; New questions also publish to the Feed!
+                  </p>
+                </div>
+              )}
+
               {/* Format Guide Card */}
               <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-2xs">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -875,7 +1146,7 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
                     Bulk Format Specification
                   </span>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <button
                       type="button"
                       onClick={() => setBulkText(BULK_QUIZ_TEMPLATE)}
@@ -890,15 +1161,23 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
                       className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-100 active:scale-95"
                     >
                       <Copy className="h-3 w-3" />
-                      <span>{copiedTemplate ? 'Copied!' : 'Copy Format'}</span>
+                      <span>{copiedTemplate ? 'Copied!' : 'Copy'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadSampleTxt}
+                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-100 active:scale-95"
+                    >
+                      <Download className="h-3 w-3" />
+                      <span>Sample .txt</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-100 active:scale-95"
+                      className="inline-flex items-center gap-1 rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-slate-800 active:scale-95"
                     >
                       <Upload className="h-3 w-3" />
-                      <span>.txt File</span>
+                      <span>Upload .txt</span>
                     </button>
                     <input
                       ref={fileInputRef}
@@ -910,17 +1189,40 @@ export default function CreateQuizView({ onCreated, onBackToFeed }) {
                   </div>
                 </div>
 
+                {/* Rich .txt Tags Cheat Sheet */}
+                <div className="mb-2 flex flex-wrap gap-1 text-[10px] font-bold">
+                  <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-indigo-700">
+                    $x^2$ Maths (KaTeX)
+                  </span>
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-800">
+                    BOX: 4 | 9 | ?
+                  </span>
+                  <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-sky-800">
+                    TABLE: Col1 | Col2
+                  </span>
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-800">
+                    SVG: &lt;svg&gt;...&lt;/svg&gt;
+                  </span>
+                  <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-slate-700">
+                    IMG: https://...
+                  </span>
+                </div>
+
                 <pre className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-2.5 font-mono text-[11px] leading-relaxed text-slate-700">
-{`Q: Your question text here?
-A) First option
-B) Second option
-C) Third option
-D) Fourth option
-ANS: C
-EXP: Optional explanation here`}
+{`Q: Find $x^2 + \\frac{1}{x^2}$ or missing number (?):
+BOX:
+4 | 9 | 2
+3 | 5 | 7
+8 | 1 | ?
+A) $6$
+B) $9$
+C) $4$
+D) $5$
+ANS: A
+EXP: Every row sums to 15. (Also supports TABLE:, SVG:, IMG:)`}
                 </pre>
                 <p className="mt-1.5 text-[11px] text-slate-500">
-                  Separate multiple questions with a blank line (up to 100 quizzes per batch).
+                  Separate multiple questions with a blank line (up to 100 quizzes per .txt batch). Tap &ldquo;Load Sample&rdquo; to preview Maths, Box, SVG Drawing &amp; Table together!
                 </p>
               </div>
 
@@ -978,21 +1280,33 @@ EXP: Optional explanation here`}
                   <p className="mb-2 text-[11px] font-bold tracking-wider text-slate-500 uppercase">
                     Preview ({bulkParsed.quizzes.length} Quizzes Ready)
                   </p>
-                  <div className="flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
+                  <div className="flex max-h-80 flex-col gap-2.5 overflow-y-auto pr-1">
                     {bulkParsed.quizzes.map((item, idx) => (
                       <div
                         key={idx}
                         className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs"
                       >
-                        <div className="mb-1 flex items-center justify-between gap-2">
+                        <div className="mb-1 flex items-start justify-between gap-2">
                           <span className="font-bold text-slate-900">
-                            #{idx + 1}. {item.question}
+                            #{idx + 1}. <MathText text={item.question} />
                           </span>
-                          <span className="shrink-0 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                            ✓ ANS: {String.fromCharCode(65 + item.correctIndex)}
-                          </span>
+                          <div className="flex shrink-0 items-center gap-1">
+                            {item.visualType && item.visualType !== 'none' && (
+                              <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[9px] font-bold text-slate-600 uppercase">
+                                {item.visualType}
+                              </span>
+                            )}
+                            <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                              ✓ ANS: {String.fromCharCode(65 + item.correctIndex)}
+                            </span>
+                          </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-1 text-[11px] text-slate-600">
+                        <QuizVisualBlock
+                          visualType={item.visualType}
+                          visualData={item.visualData}
+                          compact
+                        />
+                        <div className="mt-1.5 grid grid-cols-2 gap-1 text-[11px] text-slate-600">
                           {item.options.map((opt, oIdx) => (
                             <span
                               key={oIdx}
@@ -1002,7 +1316,8 @@ EXP: Optional explanation here`}
                                   : 'truncate'
                               }
                             >
-                              {String.fromCharCode(65 + oIdx)}) {opt}
+                              {String.fromCharCode(65 + oIdx)}){' '}
+                              <MathText text={opt} />
                             </span>
                           ))}
                         </div>
@@ -1028,8 +1343,12 @@ EXP: Optional explanation here`}
                 )}
                 <span>
                   {submitting
-                    ? 'Publishing Batch...'
-                    : `Publish ${bulkParsed.quizzes.length || ''} Quizzes in Bulk`}
+                    ? createMode === 'mock'
+                      ? 'Publishing Mock Test...'
+                      : 'Publishing Batch...'
+                    : createMode === 'mock'
+                      ? `Publish Mock Test (${bulkParsed.quizzes.length || 0} Qs · ${mockDurationMinutes}m)`
+                      : `Publish ${bulkParsed.quizzes.length || ''} Quizzes in Bulk`}
                 </span>
               </button>
             </form>

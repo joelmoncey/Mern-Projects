@@ -52,7 +52,7 @@ export async function getLeaderboard(req, res, next) {
 
       const userIds = creatorAgg.map((row) => row._id).filter(Boolean);
       const users = await User.find({ _id: { $in: userIds } })
-        .select('firstName username photoUrl streakCount followers')
+        .select('firstName username photoUrl streakCount followers isSupporter starsContributed')
         .lean();
 
       const userMap = new Map(users.map((u) => [String(u._id), u]));
@@ -66,6 +66,8 @@ export async function getLeaderboard(req, res, next) {
             firstName: u.firstName,
             username: u.username || '',
             photoUrl: u.photoUrl || '',
+            isSupporter: Boolean(u.isSupporter),
+            starsContributed: u.starsContributed || 0,
             quizzesCreated: row.quizzesCreated,
             likesReceived: row.likesReceived,
             attemptsReceived: row.attemptsReceived,
@@ -114,7 +116,7 @@ export async function getLeaderboard(req, res, next) {
     if (attemptAgg.length > 0) {
       const userIds = attemptAgg.map((r) => r._id).filter(Boolean);
       const users = await User.find({ _id: { $in: userIds } })
-        .select('firstName username photoUrl streakCount totalSolved correctSolved')
+        .select('firstName username photoUrl streakCount totalSolved correctSolved isSupporter starsContributed')
         .lean();
       const userMap = new Map(users.map((u) => [String(u._id), u]));
 
@@ -133,6 +135,8 @@ export async function getLeaderboard(req, res, next) {
             firstName: u.firstName,
             username: u.username || '',
             photoUrl: u.photoUrl || '',
+            isSupporter: Boolean(u.isSupporter),
+            starsContributed: u.starsContributed || 0,
             weeklySolved,
             weeklyCorrect,
             accuracy,
@@ -151,7 +155,7 @@ export async function getLeaderboard(req, res, next) {
       })
         .sort({ correctSolved: -1, totalSolved: -1, streakCount: -1 })
         .limit(25)
-        .select('firstName username photoUrl streakCount totalSolved correctSolved')
+        .select('firstName username photoUrl streakCount totalSolved correctSolved isSupporter starsContributed')
         .lean();
 
       solverRows = fallbackUsers.map((u) => {
@@ -166,6 +170,8 @@ export async function getLeaderboard(req, res, next) {
           firstName: u.firstName,
           username: u.username || '',
           photoUrl: u.photoUrl || '',
+          isSupporter: Boolean(u.isSupporter),
+          starsContributed: u.starsContributed || 0,
           weeklySolved,
           weeklyCorrect,
           accuracy,

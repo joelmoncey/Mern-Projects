@@ -74,6 +74,21 @@ const userSchema = new Schema(
       default: 0,
       min: 0,
     },
+    // Telegram Stars ("Buy Me a Chai") Supporter tracking
+    starsContributed: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    isSupporter: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    supporterSince: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

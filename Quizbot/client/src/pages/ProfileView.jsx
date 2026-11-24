@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Award,
   Check,
+  Coffee,
   Edit3,
   Flag,
   Flame,
@@ -13,6 +14,7 @@ import {
   Play,
   Shield,
   SlidersHorizontal,
+  Star,
   Target,
   Trash2,
   UserCheck,
@@ -26,6 +28,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import EditQuizModal from '../components/EditQuizModal.jsx';
 import ExamTopicPickerModal from '../components/ExamTopicPickerModal.jsx';
 import QuizCard from '../components/QuizCard.jsx';
+import { MathText, QuizVisualBlock } from '../components/QuizRichContent.jsx';
 import { formatHierarchyPath } from './CreateQuizView.jsx';
 
 function getTopicKey(quiz) {
@@ -182,10 +185,17 @@ function ProfileQuizItem({
         )}
       </div>
 
-      {/* Question */}
-      <p className="mb-3 text-sm leading-snug font-bold text-slate-900">
-        {quiz.question}
-      </p>
+      {/* Question + Optional Visual */}
+      <div className="mb-3">
+        <p className="text-sm leading-snug font-bold text-slate-900">
+          <MathText text={quiz.question} />
+        </p>
+        <QuizVisualBlock
+          visualType={quiz.visualType}
+          visualData={quiz.visualData}
+          compact
+        />
+      </div>
 
       {/* Interactive Options with vibrant Green (✓ RIGHT) & Red (✕ WRONG) */}
       <div className="flex flex-col gap-1.5">
@@ -236,7 +246,7 @@ function ProfileQuizItem({
                       : ''
                 }`}
               >
-                {opt}
+                <MathText text={opt} />
               </span>
               {isCorrectOption && (
                 <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white uppercase">
@@ -266,7 +276,7 @@ function ProfileQuizItem({
           <span className="font-bold">
             {attemptResult.isCorrect ? '✓ Right: ' : '✕ Explanation: '}
           </span>
-          {attemptResult.explanation}
+          <MathText text={attemptResult.explanation} />
         </div>
       )}
 
@@ -288,6 +298,7 @@ export default function ProfileView({
   onUpdateExamFilter = null,
   onBack = null,
   onOpenAdmin = null,
+  onOpenChaiModal = null,
 }) {
   const { user, isOfflinePreview, updateUserStats, updateUserProfile } =
     useAuth();
@@ -769,6 +780,21 @@ export default function ProfileView({
                         Approved Creator
                       </span>
                     ) : null}
+                    {(profile.isSupporter ||
+                      (profile.isOwnProfile && user?.isSupporter)) && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-300 bg-gradient-to-r from-amber-50 to-orange-50 px-2 py-0.5 text-[10px] font-extrabold text-amber-900">
+                        <span>☕ Supporter</span>
+                        {(profile.starsContributed ||
+                          (profile.isOwnProfile ? user?.starsContributed : 0)) >
+                          0 && (
+                          <span className="text-amber-700">
+                            ·{' '}
+                            {profile.starsContributed || user?.starsContributed}
+                            ★
+                          </span>
+                        )}
+                      </span>
+                    )}
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                     <p className="truncate text-xs font-semibold text-slate-600">
@@ -913,6 +939,38 @@ export default function ProfileView({
               </div>
             </div>
           </div>
+
+          {/* Buy Me a Chai Support Card (Telegram Stars, 1 Star = ₹2) */}
+          {profile.isOwnProfile && onOpenChaiModal && (
+            <div className="mb-5 flex items-center justify-between gap-3 rounded-2xl border border-amber-200/90 bg-gradient-to-r from-[#FFFBEB] via-[#FFF7ED] to-[#FFFBEB] p-3.5 shadow-2xs">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-xs">
+                  <Coffee className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="text-xs font-extrabold text-slate-900">
+                      Buy Quiz-Gram a Chai
+                    </p>
+                    <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.2 text-[9px] font-extrabold text-amber-900">
+                      <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-600" />
+                      1★ = ₹{Number(import.meta.env.VITE_STAR_TO_INR) || 2}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-slate-600">
+                    Contribute with Telegram Stars &amp; get the ☕ Supporter badge!
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onOpenChaiModal}
+                className="shrink-0 rounded-full bg-slate-900 px-3.5 py-2 text-[11px] font-extrabold text-white shadow-xs transition hover:bg-amber-600 active:scale-95"
+              >
+                ☕ Treat
+              </button>
+            </div>
+          )}
 
           {/* Single-Topic Selector (Pre-selected from user's Exam & Subject filter) + Scroll Section */}
           {quizzes.length === 0 ? (

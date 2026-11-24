@@ -7,6 +7,9 @@ import quizRoutes from './routes/quizRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import leaderboardRoutes from './routes/leaderboardRoutes.js';
+import paymentRoutes from './routes/paymentRoutes.js';
+import mockTestRoutes from './routes/mockTestRoutes.js';
+import { handleTelegramWebhook } from './controllers/paymentController.js';
 import { apiLimiter } from './middleware/rateLimiter.js';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
 
@@ -58,7 +61,11 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: '500kb' }));
+app.use(express.json({ limit: '2mb' }));
+
+// Telegram Bot Webhook for Stars payments (mounted before rate limiter)
+app.post('/api/telegram/webhook', handleTelegramWebhook);
+
 app.use('/api', apiLimiter);
 
 // Routes
@@ -69,6 +76,8 @@ app.use('/api/quizzes', quizRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/mock-tests', mockTestRoutes);
 
 // Error handling
 app.use(notFoundHandler);

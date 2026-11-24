@@ -58,12 +58,49 @@ function rotateByCreator(quizzes) {
 }
 
 /**
- * Builds a balanced, deduplicated, creator-rotated quiz feed.
+ * Returns the UTC Date representing 00:00:00 of the current day in the configured
+ * timezone offset (defaults to IST +05:30 = 330 minutes).
+ *
+ * @param {Date} [now=new Date()]
+ * @param {number} [tzOffsetMinutes=330]
+ * @returns {Date}
+ */
+export function getStartOfLocalDay(
+  now = new Date(),
+  tzOffsetMinutes = Number(process.env.FEED_TIMEZONE_OFFSET_MINUTES ?? 330)
+) {
+  const offsetMs = (Number.isFinite(tzOffsetMinutes) ? tzOffsetMinutes : 330) * 60_000;
+  const shifted = new Date(now.getTime() + offsetMs);
+  const localMidnightUtcMs = Date.UTC(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth(),
+    shifted.getUTCDate()
+  );
+  return new Date(localMidnightUtcMs - offsetMs);
+}
+
+function getCreatedAtMs(quiz) {
+  if (!quiz?.createdAt) return 0;
+  const ms = new Date(quiz.createdAt).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * Builds a balanced, deduplicated quiz feed.
+ *
+ * When `prioritizeNewest: true` is passed (default for the live Feed API):
+ *  1. Strictly excludes all hashes in `seenQuestionHashes` (zero repeats on the same day).
+ *  2. Deduplicates identical `questionHash` across creators/mock tests (keeping newest).
+ *  3. Serves brand-new unseen questions FIRST, strictly newest-first (`createdAt` desc).
+ *  4. Once fresh unseen questions are exhausted, serves previous-day questions from
+ *     `earlierRepeatHashes` (attempted yesterday or earlier, never today) for spaced revision.
  *
  * @param {object} params
  * @param {string|null} [params.examName] Optional exam filter (omit or pass 'ALL' for all active exams)
  * @param {Array<object>} [params.candidates] Candidate quiz documents/objects
- * @param {Iterable<string>} [params.seenQuestionHashes] Hashes already seen or answered by the user
+ * @param {Iterable<string>} [params.seenQuestionHashes] Hashes already seen or answered TODAY
+ * @param {Iterable<string>} [params.earlierRepeatHashes] Hashes answered on PREVIOUS days (eligible after fresh questions)
+ * @param {boolean} [params.prioritizeNewest=false] When true, serves newest unseen questions first, then previous-day repeats
  * @param {number} [params.limit=20] Maximum number of quizzes to return
  * @returns {Array<object>}
  */
@@ -71,6 +108,8 @@ export function buildFeed({
   examName = null,
   candidates = [],
   seenQuestionHashes = [],
+  earlierRepeatHashes = [],
+  prioritizeNewest = false,
   limit = 20,
 } = {}) {
   const maxItems = Math.max(0, Number(limit) || 0);
@@ -86,6 +125,46 @@ export function buildFeed({
       : null;
 
   const excludedHashes = new Set(seenQuestionHashes || []);
+
+  if (prioritizeNewest) {
+    const earlierSet = new Set(earlierRepeatHashes || []);
+    const sortedCandidates = [...candidates].sort(
+      (a, b) => getCreatedAtMs(b) - getCreatedAtMs(a)
+    );
+
+    const emittedHashes = new Set(excludedHashes);
+    const freshTier = [];
+    const repeatTier = [];
+
+    for (const quiz of sortedCandidates) {
+      if (!quiz || quiz.isHidden) continue;
+
+      if (
+        quiz.hashtag &&
+        typeof quiz.hashtag === 'object' &&
+        quiz.hashtag.isActive === false
+      ) {
+        continue;
+      }
+
+      if (normalizedExamFilter) {
+        const quizExam = String(quiz.examName || '').trim().toLowerCase();
+        if (quizExam !== normalizedExamFilter) continue;
+      }
+
+      const hash = getQuizHash(quiz);
+      if (emittedHashes.has(hash)) continue;
+      emittedHashes.add(hash);
+
+      if (earlierSet.has(hash)) {
+        repeatTier.push(quiz);
+      } else {
+        freshTier.push(quiz);
+      }
+    }
+
+    return [...freshTier, ...repeatTier].slice(0, maxItems);
+  }
 
   // 1. Filter eligible candidates and group by subject hashtag
   const subjectBuckets = new Map();

@@ -23,15 +23,26 @@ export function normalizeQuestion(question) {
 
 /**
  * Computes the SHA-256 hex digest of a normalized question string.
+ * When visualData (box/table/svg/image) is attached, includes a normalized
+ * visual fingerprint so distinct puzzles sharing the same prompt text
+ * (e.g. "Find the missing number (?)") do not collide as duplicates.
  *
  * @param {string} question
+ * @param {string} [visualData='']
  * @returns {{ normalizedQuestion: string, questionHash: string }}
  */
-export function computeQuestionHash(question) {
+export function computeQuestionHash(question, visualData = '') {
   const normalizedQuestion = normalizeQuestion(question);
+  const normalizedVisual =
+    typeof visualData === 'string'
+      ? visualData.trim().replace(/\s+/g, ' ')
+      : '';
+  const hashInput = normalizedVisual
+    ? `${normalizedQuestion}::${normalizedVisual}`
+    : normalizedQuestion;
   const questionHash = crypto
     .createHash('sha256')
-    .update(normalizedQuestion, 'utf8')
+    .update(hashInput, 'utf8')
     .digest('hex');
 
   return { normalizedQuestion, questionHash };

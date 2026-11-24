@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Award,
+  Coffee,
   Flame,
   Heart,
   Loader2,
@@ -17,6 +18,8 @@ const OFFLINE_SOLVERS = [
     userId: 'c1',
     firstName: 'Aarav',
     username: 'civil_prep',
+    isSupporter: true,
+    starsContributed: 50,
     weeklyCorrect: 48,
     weeklySolved: 52,
     accuracy: 92,
@@ -78,7 +81,10 @@ function getRankBadgeClasses(rank) {
   return 'bg-slate-100 text-slate-700 border border-slate-200';
 }
 
-export default function LeaderboardView({ onOpenCreatorProfile }) {
+export default function LeaderboardView({
+  onOpenCreatorProfile,
+  onOpenChaiModal,
+}) {
   const { isOfflinePreview } = useAuth();
   const [boardType, setBoardType] = useState('solvers'); // 'solvers' | 'creators'
   const [entries, setEntries] = useState([]);
@@ -128,9 +134,22 @@ export default function LeaderboardView({ onOpenCreatorProfile }) {
           </div>
         </div>
 
-        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold tracking-wider text-slate-600 uppercase shadow-2xs">
-          7 Days
-        </span>
+        <div className="flex items-center gap-1.5">
+          {onOpenChaiModal && (
+            <button
+              type="button"
+              onClick={onOpenChaiModal}
+              className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-[10px] font-extrabold text-amber-900 shadow-2xs transition hover:bg-amber-100 active:scale-95"
+              title="Buy Quiz-Gram a Chai to unlock the ☕ Supporter badge"
+            >
+              <Coffee className="h-3 w-3 text-amber-600" />
+              <span>Chai</span>
+            </button>
+          )}
+          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold tracking-wider text-slate-600 uppercase shadow-2xs">
+            7 Days
+          </span>
+        </div>
       </div>
 
       {/* Segmented Toggle: Top Solvers vs Top Creators */}
@@ -218,11 +237,21 @@ export default function LeaderboardView({ onOpenCreatorProfile }) {
                     {initial}
                   </div>
 
-                  {/* User Handle */}
+                  {/* User Handle + Supporter Badge */}
                   <div className="min-w-0">
-                    <p className="truncate text-xs font-bold text-slate-900">
-                      {entry.firstName}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <p className="truncate text-xs font-bold text-slate-900">
+                        {entry.firstName}
+                      </p>
+                      {entry.isSupporter && (
+                        <span
+                          title={`Chai Supporter (${entry.starsContributed || 0} Telegram Stars)`}
+                          className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-amber-300 bg-amber-50 px-1.5 py-0.2 text-[9px] font-extrabold text-amber-900"
+                        >
+                          ☕ Supporter
+                        </span>
+                      )}
+                    </div>
                     <p className="truncate text-[11px] font-medium text-slate-500">
                       @{entry.username || 'aspirant'}
                     </p>

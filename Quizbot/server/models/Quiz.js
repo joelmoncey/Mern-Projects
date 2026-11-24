@@ -79,7 +79,19 @@ const quizSchema = new Schema(
       type: String,
       required: true,
       trim: true,
-      maxlength: 300,
+      maxlength: 600,
+    },
+    // Optional rich visual block attached to the question (Maths Box, Table, inline SVG drawing, or Image URL)
+    visualType: {
+      type: String,
+      enum: ['none', 'box', 'table', 'svg', 'image'],
+      default: 'none',
+    },
+    visualData: {
+      type: String,
+      trim: true,
+      maxlength: 8000,
+      default: '',
     },
     normalizedQuestion: {
       type: String,
@@ -114,7 +126,7 @@ const quizSchema = new Schema(
     explanation: {
       type: String,
       trim: true,
-      maxlength: 400,
+      maxlength: 800,
       default: '',
     },
     likes: [
@@ -190,9 +202,15 @@ const quizSchema = new Schema(
 );
 
 quizSchema.pre('validate', function populateQuestionHash(next) {
-  if (this.question && (this.isModified('question') || !this.questionHash)) {
+  if (
+    this.question &&
+    (this.isModified('question') ||
+      this.isModified('visualData') ||
+      !this.questionHash)
+  ) {
     const { normalizedQuestion, questionHash } = computeQuestionHash(
-      this.question
+      this.question,
+      this.visualData || ''
     );
     this.normalizedQuestion = normalizedQuestion;
     this.questionHash = questionHash;

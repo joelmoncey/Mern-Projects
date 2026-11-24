@@ -9,6 +9,7 @@ import NotificationsView from './pages/NotificationsView.jsx';
 import LeaderboardView from './pages/LeaderboardView.jsx';
 import ProfileView from './pages/ProfileView.jsx';
 import AdminHashtagsView from './pages/AdminHashtagsView.jsx';
+import BuyMeAChaiModal from './components/BuyMeAChaiModal.jsx';
 
 const EXAM_FILTER_STORAGE_KEY = 'quiz_gram_exam_filter_v1';
 
@@ -31,6 +32,7 @@ function AppShell() {
   const [creatorBackTab, setCreatorBackTab] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [examFilter, setExamFilter] = useState(() => loadSavedExamFilter());
+  const [showChaiModal, setShowChaiModal] = useState(false);
 
   function handleUpdateExamFilter(nextFilter) {
     setExamFilter(nextFilter);
@@ -149,6 +151,7 @@ function AppShell() {
               onUpdateExamFilter={handleUpdateExamFilter}
               onOpenCreate={() => handleChangeTab('create')}
               onOpenCreatorProfile={handleOpenCreatorProfile}
+              onOpenChaiModal={() => setShowChaiModal(true)}
             />
           )}
           {currentTab === 'create' && (
@@ -164,7 +167,10 @@ function AppShell() {
             />
           )}
           {currentTab === 'leaderboard' && (
-            <LeaderboardView onOpenCreatorProfile={handleOpenCreatorProfile} />
+            <LeaderboardView
+              onOpenCreatorProfile={handleOpenCreatorProfile}
+              onOpenChaiModal={() => setShowChaiModal(true)}
+            />
           )}
           {currentTab === 'profile' && (
             <ProfileView
@@ -172,6 +178,7 @@ function AppShell() {
               examFilter={examFilter}
               onUpdateExamFilter={handleUpdateExamFilter}
               onOpenAdmin={isAdmin ? () => handleChangeTab('admin') : null}
+              onOpenChaiModal={() => setShowChaiModal(true)}
             />
           )}
           {currentTab === 'admin' && isAdmin && (
@@ -189,6 +196,10 @@ function AppShell() {
         onChangeTab={handleChangeTab}
         unreadCount={unreadCount}
       />
+
+      {showChaiModal && (
+        <BuyMeAChaiModal onClose={() => setShowChaiModal(false)} />
+      )}
     </main>
   );
 }

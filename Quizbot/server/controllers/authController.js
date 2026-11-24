@@ -30,6 +30,8 @@ function serializeUser(user) {
     lastActiveDate: user.lastActiveDate,
     totalSolved: user.totalSolved,
     correctSolved: user.correctSolved,
+    isSupporter: Boolean(user.isSupporter),
+    starsContributed: user.starsContributed || 0,
   };
 }
 

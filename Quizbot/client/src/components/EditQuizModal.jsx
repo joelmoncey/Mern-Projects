@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { AlertCircle, Check, Flag, Loader2, Save, X } from 'lucide-react';
 import { apiRequest } from '../lib/api.js';
+import { MathText, QuizVisualBlock } from './QuizRichContent.jsx';
 
 export default function EditQuizModal({ quiz, onClose, onSaved }) {
   const [question, setQuestion] = useState(quiz.question || '');
+  const [visualType, setVisualType] = useState(quiz.visualType || 'none');
+  const [visualData, setVisualData] = useState(quiz.visualData || '');
   const [options, setOptions] = useState(
     Array.isArray(quiz.options) && quiz.options.length === 4
       ? [...quiz.options]
@@ -41,6 +44,8 @@ export default function EditQuizModal({ quiz, onClose, onSaved }) {
         method: 'PATCH',
         body: {
           question: question.trim(),
+          visualType: visualData.trim() ? visualType : 'none',
+          visualData: visualType === 'none' ? '' : visualData.trim(),
           options: options.map((opt) => opt.trim()),
           correctIndex: Number(correctIndex),
           explanation: explanation.trim(),
@@ -113,20 +118,72 @@ export default function EditQuizModal({ quiz, onClose, onSaved }) {
           <div>
             <div className="mb-1 flex items-center justify-between">
               <label className="text-xs font-bold text-slate-700">
-                Question
+                Question (supports $...$ Maths)
               </label>
               <span className="text-[11px] text-slate-400">
-                {question.length}/300
+                {question.length}/600
               </span>
             </div>
             <textarea
               rows={3}
-              maxLength={300}
+              maxLength={600}
               required
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-900 focus:bg-white"
             />
+          </div>
+
+          {/* Optional Visual Attachment (Box / Table / SVG / Image) */}
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <label className="text-[11px] font-bold text-slate-600 uppercase">
+                Visual / Box / Drawing (optional)
+              </label>
+              <select
+                value={visualType}
+                onChange={(e) => setVisualType(e.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-800 outline-none"
+              >
+                <option value="none">None</option>
+                <option value="box">Grid Box (|)</option>
+                <option value="table">Table (|)</option>
+                <option value="svg">SVG Drawing</option>
+                <option value="image">Image URL</option>
+              </select>
+            </div>
+            {visualType !== 'none' && (
+              <>
+                <textarea
+                  rows={3}
+                  value={visualData}
+                  onChange={(e) => setVisualData(e.target.value)}
+                  placeholder={
+                    visualType === 'svg'
+                      ? '<svg viewBox="0 0 180 120">...</svg>'
+                      : visualType === 'image'
+                        ? 'https://example.com/diagram.png'
+                        : '4 | 9 | 2\n3 | 5 | 7\n8 | 1 | ?'
+                  }
+                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 font-mono text-[11px] text-slate-900 outline-none focus:border-slate-900"
+                />
+                {visualData.trim() && (
+                  <QuizVisualBlock
+                    visualType={visualType}
+                    visualData={visualData}
+                    compact
+                  />
+                )}
+              </>
+            )}
+            {question.includes('$') && (
+              <div className="mt-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900">
+                <span className="mr-1.5 text-[10px] font-bold text-slate-400 uppercase">
+                  Preview:
+                </span>
+                <MathText text={question} />
+              </div>
+            )}
           </div>
 
           <div>
@@ -217,12 +274,12 @@ export default function EditQuizModal({ quiz, onClose, onSaved }) {
                 Explanation
               </label>
               <span className="text-[11px] text-slate-400">
-                {explanation.length}/400
+                {explanation.length}/800
               </span>
             </div>
             <textarea
               rows={3}
-              maxLength={400}
+              maxLength={800}
               value={explanation}
               onChange={(e) => setExplanation(e.target.value)}
               className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5 text-sm text-slate-900 outline-none focus:border-slate-900 focus:bg-white"

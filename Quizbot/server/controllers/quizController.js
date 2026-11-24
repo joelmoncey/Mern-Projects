@@ -5,7 +5,8 @@ import User from '../models/User.js';
 import Notification from '../models/Notification.js';
 import Attempt from '../models/Attempt.js';
 import { computeQuestionHash } from '../utils/questionHash.js';
-import { buildFeed } from '../utils/feedBuilder.js';
+import { validateAndSanitizeVisual } from '../utils/quizVisuals.js';
+import { buildFeed, getStartOfLocalDay } from '../utils/feedBuilder.js';
 import {
   evaluateFlagEscalation,
   notifyAdminsOfEscalation,
@@ -38,12 +39,19 @@ function getUtcDayStart(date) {
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
 }
 
-function validateQuizPayload({ question, options, correctIndex, explanation }) {
+function validateQuizPayload({
+  question,
+  options,
+  correctIndex,
+  explanation,
+  visualType = 'none',
+  visualData = '',
+}) {
   if (!question || typeof question !== 'string' || !question.trim()) {
     return { error: 'Question text is required' };
   }
-  if (question.trim().length > 300) {
-    return { error: 'Question must be 300 characters or fewer' };
+  if (question.trim().length > 600) {
+    return { error: 'Question must be 600 characters or fewer' };
   }
 
   if (
@@ -64,17 +72,27 @@ function validateQuizPayload({ question, options, correctIndex, explanation }) {
   }
 
   const trimmedExplanation = String(explanation || '').trim();
-  if (trimmedExplanation.length > 400) {
-    return { error: 'Explanation must be 400 characters or fewer' };
+  if (trimmedExplanation.length > 800) {
+    return { error: 'Explanation must be 800 characters or fewer' };
   }
 
-  const { normalizedQuestion, questionHash } = computeQuestionHash(question);
+  const visual = validateAndSanitizeVisual({ visualType, visualData });
+  if (visual.error) {
+    return { error: visual.error };
+  }
+
+  const { normalizedQuestion, questionHash } = computeQuestionHash(
+    question,
+    visual.visualData
+  );
   if (!normalizedQuestion) {
     return { error: 'Question text is invalid' };
   }
 
   return {
     question: question.trim(),
+    visualType: visual.visualType,
+    visualData: visual.visualData,
     normalizedQuestion,
     questionHash,
     options: options.map((opt) => opt.trim()),
@@ -100,6 +118,8 @@ export async function createQuiz(req, res, next) {
       options,
       correctIndex,
       explanation = '',
+      visualType = 'none',
+      visualData = '',
     } = req.body || {};
 
     const hashtagRef = hashtagId || hashtag;
@@ -129,6 +149,8 @@ export async function createQuiz(req, res, next) {
       options,
       correctIndex,
       explanation,
+      visualType,
+      visualData,
     });
     if (validated.error) {
       return res.status(400).json({ error: validated.error });
@@ -181,6 +203,8 @@ export async function createQuiz(req, res, next) {
       subSubjectName: hashtagDoc.subSubjectName || '',
       subTopicName: hashtagDoc.subTopicName || '',
       question: validated.question,
+      visualType: validated.visualType,
+      visualData: validated.visualData,
       normalizedQuestion: validated.normalizedQuestion,
       questionHash: validated.questionHash,
       options: validated.options,
@@ -349,6 +373,8 @@ export async function createBulkQuizzes(req, res, next) {
         subSubjectName: hashtagDoc.subSubjectName || '',
         subTopicName: hashtagDoc.subTopicName || '',
         question: candidate.question,
+        visualType: candidate.visualType,
+        visualData: candidate.visualData,
         normalizedQuestion: candidate.normalizedQuestion,
         questionHash: candidate.questionHash,
         options: candidate.options,
@@ -417,9 +443,48 @@ export async function getQuizFeed(req, res, next) {
         .lean();
     }
 
-    const effectiveSeenList = pinnedQuiz
-      ? Array.from(new Set([...seenList, pinnedQuiz.questionHash]))
-      : seenList;
+    // Resolve user's today attempts (blocked for rest of today) vs earlier-day attempts (allowed after newest unseen)
+    const todayAttemptedHashes = new Set();
+    const earlierAttemptedHashes = new Set();
+
+    if (req.user?._id) {
+      const todayStart = getStartOfLocalDay();
+      const userAttempts = await Attempt.find({ user: req.user._id })
+        .sort({ createdAt: -1 })
+        .limit(1000)
+        .select('quiz createdAt')
+        .lean();
+
+      if (userAttempts.length > 0) {
+        const quizIds = Array.from(
+          new Set(userAttempts.map((a) => String(a.quiz)).filter(Boolean))
+        );
+        const attemptedQuizzes = await Quiz.find({ _id: { $in: quizIds } })
+          .select('_id questionHash')
+          .lean();
+        const hashByQuizId = new Map(
+          attemptedQuizzes.map((q) => [String(q._id), q.questionHash])
+        );
+
+        for (const att of userAttempts) {
+          const hash = hashByQuizId.get(String(att.quiz));
+          if (!hash) continue;
+          if (new Date(att.createdAt) >= todayStart) {
+            todayAttemptedHashes.add(hash);
+          } else {
+            earlierAttemptedHashes.add(hash);
+          }
+        }
+      }
+    }
+
+    const effectiveSeenList = Array.from(
+      new Set([
+        ...seenList,
+        ...todayAttemptedHashes,
+        ...(pinnedQuiz?.questionHash ? [pinnedQuiz.questionHash] : []),
+      ])
+    );
 
     const query = { isHidden: false };
 
@@ -588,6 +653,8 @@ export async function getQuizFeed(req, res, next) {
       examName: query.examName || null,
       candidates,
       seenQuestionHashes: effectiveSeenList,
+      earlierRepeatHashes: earlierAttemptedHashes,
+      prioritizeNewest: true,
       limit: remainingSlots + 1,
     });
 
@@ -628,7 +695,10 @@ export async function getQuizFeed(req, res, next) {
         subSubjectName: q.subSubjectName || q.hashtag?.subSubjectName || '',
         subTopicName: q.subTopicName || q.hashtag?.subTopicName || '',
         question: q.question,
+        visualType: q.visualType || 'none',
+        visualData: q.visualData || '',
         questionHash: q.questionHash,
+        isRevisionRepeat: earlierAttemptedHashes.has(q.questionHash),
         options: q.options,
         likesCount: likes.length,
         isLiked: currentUserId
@@ -876,6 +946,14 @@ export async function updateQuiz(req, res, next) {
         req.body?.explanation !== undefined
           ? req.body.explanation
           : quiz.explanation,
+      visualType:
+        req.body?.visualType !== undefined
+          ? req.body.visualType
+          : quiz.visualType,
+      visualData:
+        req.body?.visualData !== undefined
+          ? req.body.visualData
+          : quiz.visualData,
     });
 
     if (validated.error) {
@@ -894,6 +972,8 @@ export async function updateQuiz(req, res, next) {
 
     const now = new Date();
     quiz.question = validated.question;
+    quiz.visualType = validated.visualType;
+    quiz.visualData = validated.visualData;
     quiz.normalizedQuestion = validated.normalizedQuestion;
     quiz.questionHash = validated.questionHash;
     quiz.options = validated.options;

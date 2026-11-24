@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   BookOpen,
   Check,
@@ -12,6 +12,7 @@ import {
 import { apiRequest } from '../lib/api.js';
 import { shareQuizViaTelegram } from '../lib/telegram.js';
 import { formatHierarchyPath } from '../pages/CreateQuizView.jsx';
+import { MathText, QuizVisualBlock } from './QuizRichContent.jsx';
 
 const FLAG_REASONS = [
   'Wrong answer key',
@@ -26,7 +27,10 @@ export default function QuizCard({
   onStatsUpdated,
   onFollowChanged,
   onOpenCreatorProfile,
+  onViewed,
 }) {
+  const cardRef = useRef(null);
+  const viewedReportedRef = useRef(false);
   const [selectedIndex, setSelectedIndex] = useState(null);
   const [submittingAttempt, setSubmittingAttempt] = useState(false);
   const [attemptResult, setAttemptResult] = useState(null);
@@ -44,6 +48,26 @@ export default function QuizCard({
   const [submittingFlag, setSubmittingFlag] = useState(false);
 
   const [toast, setToast] = useState('');
+
+  // Mark questionHash as viewed today once this card stays visible in viewport
+  useEffect(() => {
+    if (!onViewed || !quiz?.questionHash || viewedReportedRef.current) return;
+    const el = cardRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && !viewedReportedRef.current) {
+          viewedReportedRef.current = true;
+          onViewed(quiz.questionHash);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.65 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [onViewed, quiz?.questionHash]);
 
   const isAnswered = attemptResult !== null;
   const tagLabel =
@@ -208,7 +232,10 @@ export default function QuizCard({
       : null;
 
   return (
-    <section className="quiz-feed-card relative flex w-full flex-col justify-between bg-[#F8FAFC] px-4 pt-24 pb-20">
+    <section
+      ref={cardRef}
+      className="quiz-feed-card relative flex w-full flex-col justify-between bg-[#F8FAFC] px-4 pt-24 pb-20"
+    >
       {/* Toast pill */}
       {toast && (
         <div className="pointer-events-none absolute top-24 left-1/2 z-30 -translate-x-1/2 rounded-full border border-slate-200 bg-slate-900 px-4 py-1.5 text-xs font-semibold whitespace-nowrap text-white shadow-md">
@@ -225,6 +252,11 @@ export default function QuizCard({
           {quiz.language && (
             <span className="rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-slate-700 uppercase shadow-2xs">
               {quiz.language}
+            </span>
+          )}
+          {quiz.isRevisionRepeat && (
+            <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold tracking-wider text-indigo-700 uppercase">
+              Revision
             </span>
           )}
           {quiz.editCount > 0 && (
@@ -274,11 +306,15 @@ export default function QuizCard({
       </div>
 
       {/* Main Question + 4 Option Cards (with right padding for the Instagram vertical rail) */}
-      <div className="my-auto flex flex-col gap-3.5 py-2 pr-14">
+      <div className="my-auto flex flex-col gap-3 py-2 pr-14">
         <div className="rounded-2xl border border-slate-200/90 bg-white p-4 shadow-xs">
-          <h2 className="text-[18px] leading-snug font-bold tracking-tight text-slate-900">
-            {quiz.question}
+          <h2 className="text-[17px] leading-snug font-bold tracking-tight text-slate-900">
+            <MathText text={quiz.question} />
           </h2>
+          <QuizVisualBlock
+            visualType={quiz.visualType}
+            visualData={quiz.visualData}
+          />
         </div>
 
         <div className="flex flex-col gap-2.5">
@@ -332,7 +368,7 @@ export default function QuizCard({
                         : ''
                   }`}
                 >
-                  {option}
+                  <MathText text={option} />
                 </span>
                 {isCorrectOption && (
                   <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-0.5 text-[10px] font-bold tracking-wider text-white uppercase shadow-2xs">
@@ -381,8 +417,12 @@ export default function QuizCard({
               )}
             </div>
             <p className="font-medium">
-              {attemptResult.explanation ||
-                'No explanation provided by the creator.'}
+              <MathText
+                text={
+                  attemptResult.explanation ||
+                  'No explanation provided by the creator.'
+                }
+              />
             </p>
           </div>
         )}

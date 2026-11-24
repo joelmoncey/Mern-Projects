@@ -4,6 +4,7 @@ import {
   viewport,
   retrieveRawInitData,
   openTelegramLink,
+  invoice,
 } from '@telegram-apps/sdk-react';
 
 /**
@@ -215,4 +216,51 @@ export async function shareQuizViaTelegram(quiz) {
     window.open(telegramShareUrl, '_blank', 'noopener,noreferrer');
     return 'link';
   }
+}
+
+/**
+ * Opens a Telegram Stars invoice URL natively inside the Telegram Mini App
+ * using `window.Telegram.WebApp.openInvoice` or `@telegram-apps/sdk-react`'s `invoice.open`.
+ *
+ * @param {string} invoiceUrl
+ * @returns {Promise<'paid' | 'cancelled' | 'failed' | 'pending' | 'external'>}
+ */
+export async function openTelegramStarsInvoice(invoiceUrl) {
+  if (!invoiceUrl) return 'failed';
+
+  // 1. Native Telegram WebApp openInvoice (preferred inside Telegram Mini App)
+  if (typeof window?.Telegram?.WebApp?.openInvoice === 'function') {
+    return new Promise((resolve) => {
+      try {
+        window.Telegram.WebApp.openInvoice(invoiceUrl, (status) => {
+          resolve(status || 'cancelled');
+        });
+      } catch {
+        resolve('failed');
+      }
+    });
+  }
+
+  // 2. @telegram-apps/sdk-react v2 invoice helper
+  try {
+    if (invoice?.open?.isAvailable?.()) {
+      const status = await invoice.open(invoiceUrl, 'url');
+      return status || 'cancelled';
+    }
+  } catch {
+    // Fall through to link open
+  }
+
+  // 3. Fallback when opened outside Telegram (opens t.me invoice link)
+  try {
+    if (openTelegramLink.isAvailable()) {
+      openTelegramLink(invoiceUrl);
+      return 'external';
+    }
+  } catch {
+    // Fall through
+  }
+
+  window.open(invoiceUrl, '_blank', 'noopener,noreferrer');
+  return 'external';
 }

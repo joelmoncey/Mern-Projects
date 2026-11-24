@@ -6,6 +6,7 @@ import {
   scoreMockSubmission,
   validateMockQuestionItem,
 } from '../controllers/mockTestController.js';
+import { evaluateGuideTrigger } from '../controllers/authController.js';
 import app from '../app.js';
 
 function makeDatedQuiz({ id, question, createdAt, examName = 'SSC' }) {
@@ -163,4 +164,53 @@ test('Express app mounts /api/mock-tests, /api/payments, and /api/telegram/webho
   assert.ok(routeStrings.some((s) => s.includes('mock-tests')));
   assert.ok(routeStrings.some((s) => s.includes('payments')));
   assert.ok(routeStrings.some((s) => s.includes('/api/telegram/webhook')));
+});
+
+test('evaluateGuideTrigger shows welcome guide to new users and 7-day quiz-inactive users with cooldown', () => {
+  const now = new Date('2026-11-24T12:00:00Z');
+
+  // 1. Brand new user
+  assert.deepEqual(evaluateGuideTrigger(null, now), {
+    shouldShowGuide: true,
+    reason: 'new_user',
+  });
+
+  // 2. Active user who solved a quiz 2 days ago
+  assert.deepEqual(
+    evaluateGuideTrigger(
+      {
+        lastActiveDate: new Date('2026-11-22T12:00:00Z'),
+        lastGuideShownAt: new Date('2026-11-10T12:00:00Z'),
+        createdAt: new Date('2026-11-10T12:00:00Z'),
+      },
+      now
+    ),
+    { shouldShowGuide: false, reason: null }
+  );
+
+  // 3. Returning user inactive from quizzes for 8 days (>= 7 days)
+  assert.deepEqual(
+    evaluateGuideTrigger(
+      {
+        lastActiveDate: new Date('2026-11-16T10:00:00Z'),
+        lastGuideShownAt: new Date('2026-11-10T12:00:00Z'),
+        createdAt: new Date('2026-11-10T12:00:00Z'),
+      },
+      now
+    ),
+    { shouldShowGuide: true, reason: 'weekly_comeback' }
+  );
+
+  // 4. Cooldown: inactive 8 days, but guide was already shown yesterday
+  assert.deepEqual(
+    evaluateGuideTrigger(
+      {
+        lastActiveDate: new Date('2026-11-16T10:00:00Z'),
+        lastGuideShownAt: new Date('2026-11-23T12:00:00Z'),
+        createdAt: new Date('2026-11-10T12:00:00Z'),
+      },
+      now
+    ),
+    { shouldShowGuide: false, reason: null }
+  );
 });

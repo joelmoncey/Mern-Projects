@@ -5,6 +5,7 @@ import {
   Coffee,
   Edit3,
   Flame,
+  HelpCircle,
   Loader2,
   Play,
   RefreshCw,
@@ -104,6 +105,10 @@ export default function FeedView({
   onOpenCreate,
   onOpenCreatorProfile,
   onOpenChaiModal,
+  onOpenGuide,
+  suppressAutoFilterModal = false,
+  feedActionSignal = null,
+  onConsumedFeedAction = null,
 }) {
   const { user, isOfflinePreview, updateUserStats } = useAuth();
   const [exams, setExams] = useState([]);
@@ -135,6 +140,17 @@ export default function FeedView({
       setFeedTab('mocks');
     }
   }, []);
+
+  // Respond to direct actions triggered from the Welcome / Quick Guide modal
+  useEffect(() => {
+    if (!feedActionSignal) return;
+    if (feedActionSignal.type === 'openFilter') {
+      setShowPickerModal(true);
+    } else if (feedActionSignal.type === 'openMocks') {
+      setFeedTab('mocks');
+    }
+    onConsumedFeedAction?.();
+  }, [feedActionSignal, onConsumedFeedAction]);
 
   const sentinelRef = useRef(null);
   const initialDeepLinkRef = useRef(getDeepLinkedQuizId());
@@ -187,7 +203,9 @@ export default function FeedView({
             tag: '',
             label: `${firstExam} › All Subjects (${langs.join(' + ')})`,
           });
-          setShowPickerModal(true);
+          if (!suppressAutoFilterModal) {
+            setShowPickerModal(true);
+          }
         }
       })
       .catch(() => {})
@@ -595,7 +613,19 @@ export default function FeedView({
             </button>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1">
+            {onOpenGuide && (
+              <button
+                type="button"
+                onClick={onOpenGuide}
+                title="Open Quick Guide"
+                aria-label="Open Quick Guide"
+                className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 active:scale-95"
+              >
+                <HelpCircle className="h-3.5 w-3.5" />
+              </button>
+            )}
+
             {onOpenChaiModal && (
               <button
                 type="button"

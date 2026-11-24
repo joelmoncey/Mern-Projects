@@ -12,13 +12,19 @@ const notificationSchema = new Schema(
     },
     type: {
       type: String,
-      enum: ['flag_edit_request', 'admin_escalation'],
+      enum: [
+        'flag_edit_request',
+        'admin_escalation',
+        'welcome_guide',
+        'weekly_comeback',
+      ],
       required: true,
     },
     quiz: {
       type: Schema.Types.ObjectId,
       ref: 'Quiz',
-      required: true,
+      required: false,
+      default: null,
       index: true,
     },
     message: {

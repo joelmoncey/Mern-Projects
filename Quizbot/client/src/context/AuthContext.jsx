@@ -27,12 +27,64 @@ const OFFLINE_MOCK_USER = {
   correctSolved: 19,
 };
 
+const GUIDE_STORAGE_KEY = 'quiz_gram_welcome_guide_v1';
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function checkLocalGuideFallback(userObj) {
+  try {
+    const raw = localStorage.getItem(GUIDE_STORAGE_KEY);
+    const now = Date.now();
+    if (!raw) {
+      return { open: true, reason: 'new_user' };
+    }
+    const parsed = JSON.parse(raw);
+    const lastShownMs = Number(parsed?.lastShownAt) || 0;
+    const lastActiveMs = userObj?.lastActiveDate
+      ? new Date(userObj.lastActiveDate).getTime()
+      : Number(parsed?.lastQuizAt) || lastShownMs;
+
+    if (
+      now - lastActiveMs >= ONE_WEEK_MS &&
+      now - lastShownMs >= ONE_WEEK_MS
+    ) {
+      return { open: true, reason: 'weekly_comeback' };
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return { open: false, reason: 'new_user' };
+}
+
+function persistLocalGuideShown(userObj) {
+  try {
+    const now = Date.now();
+    const raw = localStorage.getItem(GUIDE_STORAGE_KEY);
+    const prev = raw ? JSON.parse(raw) : {};
+    localStorage.setItem(
+      GUIDE_STORAGE_KEY,
+      JSON.stringify({
+        ...prev,
+        lastShownAt: now,
+        lastQuizAt: userObj?.lastActiveDate
+          ? new Date(userObj.lastActiveDate).getTime()
+          : prev.lastQuizAt || now,
+      })
+    );
+  } catch {
+    // Ignore
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
   const [authMode, setAuthMode] = useState('loading'); // 'telegram' | 'dev' | 'offline-preview'
   const [error, setError] = useState(null);
+  const [welcomeGuide, setWelcomeGuide] = useState({
+    open: false,
+    reason: 'new_user',
+  });
 
   const authenticate = useCallback(async () => {
     setLoading(true);
@@ -54,6 +106,20 @@ export function AuthProvider({ children }) {
       setToken(data.token);
       setUser(data.user);
       setAuthMode(initData ? 'telegram' : 'dev');
+
+      if (data.showWelcomeGuide) {
+        persistLocalGuideShown(data.user);
+        setWelcomeGuide({
+          open: true,
+          reason: data.welcomeGuideReason || 'new_user',
+        });
+      } else {
+        const fallback = checkLocalGuideFallback(data.user);
+        if (fallback.open) {
+          persistLocalGuideShown(data.user);
+          setWelcomeGuide(fallback);
+        }
+      }
     } catch (err) {
       // In local browser preview when MongoDB/API is not running yet,
       // fall back to a mock admin user so every view can be inspected cleanly.
@@ -63,6 +129,11 @@ export function AuthProvider({ children }) {
         setUser(OFFLINE_MOCK_USER);
         setAuthMode('offline-preview');
         setError(err.message || 'API offline — running in local preview mode');
+        const fallback = checkLocalGuideFallback(OFFLINE_MOCK_USER);
+        if (fallback.open) {
+          persistLocalGuideShown(OFFLINE_MOCK_USER);
+          setWelcomeGuide(fallback);
+        }
       } else {
         setError(err.message || 'Telegram authentication failed');
         setAuthMode('error');
@@ -88,6 +159,16 @@ export function AuthProvider({ children }) {
 
   const updateUserStats = useCallback((userStats) => {
     if (!userStats) return;
+    try {
+      const raw = localStorage.getItem(GUIDE_STORAGE_KEY);
+      const prev = raw ? JSON.parse(raw) : {};
+      localStorage.setItem(
+        GUIDE_STORAGE_KEY,
+        JSON.stringify({ ...prev, lastQuizAt: Date.now() })
+      );
+    } catch {
+      // Ignore
+    }
     setUser((prev) =>
       prev
         ? {
@@ -98,6 +179,14 @@ export function AuthProvider({ children }) {
           }
         : prev
     );
+  }, []);
+
+  const openWelcomeGuide = useCallback((reason = 'manual') => {
+    setWelcomeGuide({ open: true, reason });
+  }, []);
+
+  const dismissWelcomeGuide = useCallback(() => {
+    setWelcomeGuide((prev) => ({ ...prev, open: false }));
   }, []);
 
   const updateUserProfile = useCallback((partial) => {
@@ -117,6 +206,9 @@ export function AuthProvider({ children }) {
         reauthenticate: authenticate,
         updateUserStats,
         updateUserProfile,
+        welcomeGuide,
+        openWelcomeGuide,
+        dismissWelcomeGuide,
       }}
     >
       {children}

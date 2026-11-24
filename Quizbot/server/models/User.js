@@ -89,6 +89,10 @@ const userSchema = new Schema(
       type: Date,
       default: null,
     },
+    lastGuideShownAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

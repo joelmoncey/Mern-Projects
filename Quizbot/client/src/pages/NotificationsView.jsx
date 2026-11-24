@@ -5,13 +5,20 @@ import {
   Edit3,
   Flag,
   Loader2,
+  MessageCircle,
   ShieldAlert,
+  Sparkles,
 } from 'lucide-react';
 import { apiRequest } from '../lib/api.js';
+import { openAdminContactLink } from '../lib/telegram.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import EditQuizModal from '../components/EditQuizModal.jsx';
 
-export default function NotificationsView({ onUnreadChanged, onOpenAdmin }) {
+export default function NotificationsView({
+  onUnreadChanged,
+  onOpenAdmin,
+  onOpenGuide,
+}) {
   const { user, isOfflinePreview } = useAuth();
   const [subTab, setSubTab] = useState('alerts'); // 'alerts' | 'myQuizzes'
   const [notifications, setNotifications] = useState([]);
@@ -177,6 +184,9 @@ export default function NotificationsView({ onUnreadChanged, onOpenAdmin }) {
           <div className="flex flex-col gap-2.5">
             {notifications.map((notif) => {
               const isEscalation = notif.type === 'admin_escalation';
+              const isGuide =
+                notif.type === 'welcome_guide' ||
+                notif.type === 'weekly_comeback';
               const quizId = notif.quiz?._id || notif.quiz;
               return (
                 <div
@@ -192,13 +202,22 @@ export default function NotificationsView({ onUnreadChanged, onOpenAdmin }) {
                       className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold tracking-wider uppercase ${
                         isEscalation
                           ? 'bg-rose-600 text-white'
-                          : 'bg-slate-900 text-white'
+                          : isGuide
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-slate-900 text-white'
                       }`}
                     >
                       {isEscalation ? (
                         <>
                           <ShieldAlert className="h-3 w-3" />
                           Admin Escalation
+                        </>
+                      ) : isGuide ? (
+                        <>
+                          <Sparkles className="h-3 w-3" />
+                          {notif.type === 'weekly_comeback'
+                            ? 'Welcome Back'
+                            : 'Welcome Guide'}
                         </>
                       ) : (
                         <>
@@ -216,7 +235,41 @@ export default function NotificationsView({ onUnreadChanged, onOpenAdmin }) {
                     {notif.message}
                   </p>
 
-                  <div className="mt-3 flex items-center gap-2">
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {isGuide && onOpenGuide && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!notif.isRead && !isOfflinePreview) {
+                            apiRequest(`/api/notifications/${notif._id}/read`, {
+                              method: 'PATCH',
+                            }).catch(() => {});
+                            setNotifications((prev) =>
+                              prev.map((n) =>
+                                n._id === notif._id ? { ...n, isRead: true } : n
+                              )
+                            );
+                          }
+                          onOpenGuide();
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-3.5 py-1.5 text-[11px] font-bold text-white shadow-2xs hover:bg-slate-800 active:scale-95"
+                      >
+                        <Sparkles className="h-3 w-3 text-emerald-400" />
+                        <span>Open Quick Guide</span>
+                      </button>
+                    )}
+
+                    {isGuide && (
+                      <button
+                        type="button"
+                        onClick={openAdminContactLink}
+                        className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 active:scale-95"
+                      >
+                        <MessageCircle className="h-3 w-3" />
+                        <span>Contact Admin</span>
+                      </button>
+                    )}
+
                     {quizId && (
                       <button
                         type="button"

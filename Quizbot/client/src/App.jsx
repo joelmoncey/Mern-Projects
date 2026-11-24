@@ -10,6 +10,7 @@ import LeaderboardView from './pages/LeaderboardView.jsx';
 import ProfileView from './pages/ProfileView.jsx';
 import AdminHashtagsView from './pages/AdminHashtagsView.jsx';
 import BuyMeAChaiModal from './components/BuyMeAChaiModal.jsx';
+import WelcomeGuideModal from './components/WelcomeGuideModal.jsx';
 
 const EXAM_FILTER_STORAGE_KEY = 'quiz_gram_exam_filter_v1';
 
@@ -25,14 +26,24 @@ function loadSavedExamFilter() {
 }
 
 function AppShell() {
-  const { user, loading, authMode, error, isOfflinePreview, reauthenticate } =
-    useAuth();
+  const {
+    user,
+    loading,
+    authMode,
+    error,
+    isOfflinePreview,
+    reauthenticate,
+    welcomeGuide,
+    openWelcomeGuide,
+    dismissWelcomeGuide,
+  } = useAuth();
   const [activeTab, setActiveTab] = useState('feed');
   const [viewingCreatorId, setViewingCreatorId] = useState(null);
   const [creatorBackTab, setCreatorBackTab] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [examFilter, setExamFilter] = useState(() => loadSavedExamFilter());
   const [showChaiModal, setShowChaiModal] = useState(false);
+  const [feedActionSignal, setFeedActionSignal] = useState(null);
 
   function handleUpdateExamFilter(nextFilter) {
     setExamFilter(nextFilter);
@@ -156,6 +167,10 @@ function AppShell() {
               onOpenCreate={() => handleChangeTab('create')}
               onOpenCreatorProfile={handleOpenCreatorProfile}
               onOpenChaiModal={() => setShowChaiModal(true)}
+              onOpenGuide={() => openWelcomeGuide('manual')}
+              suppressAutoFilterModal={Boolean(welcomeGuide?.open)}
+              feedActionSignal={feedActionSignal}
+              onConsumedFeedAction={() => setFeedActionSignal(null)}
             />
           )}
           {currentTab === 'create' && (
@@ -168,6 +183,7 @@ function AppShell() {
             <NotificationsView
               onUnreadChanged={setUnreadCount}
               onOpenAdmin={isAdmin ? () => handleChangeTab('admin') : undefined}
+              onOpenGuide={() => openWelcomeGuide('manual')}
             />
           )}
           {currentTab === 'leaderboard' && (
@@ -203,6 +219,26 @@ function AppShell() {
 
       {showChaiModal && (
         <BuyMeAChaiModal onClose={() => setShowChaiModal(false)} />
+      )}
+
+      {welcomeGuide?.open && (
+        <WelcomeGuideModal
+          reason={welcomeGuide.reason}
+          firstName={user?.firstName || ''}
+          onClose={dismissWelcomeGuide}
+          onOpenFilter={() => {
+            setViewingCreatorId(null);
+            setCreatorBackTab(null);
+            setActiveTab('feed');
+            setFeedActionSignal({ type: 'openFilter', ts: Date.now() });
+          }}
+          onOpenMocks={() => {
+            setViewingCreatorId(null);
+            setCreatorBackTab(null);
+            setActiveTab('feed');
+            setFeedActionSignal({ type: 'openMocks', ts: Date.now() });
+          }}
+        />
       )}
     </main>
   );
